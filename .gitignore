@@ -28,3 +28,12 @@
 
 # And of course, we do not leak the solution proposed by the TA :)
 solution/
+
+
+# Student Specific
+grading/
+include/
+playground/
+reference/
+sync-examples/
+template/
