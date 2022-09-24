@@ -18,22 +18,17 @@
  *
  * @section DESCRIPTION
  *
- * Implementation of the transaction manager.
+ * Implementation of the STM.
  **/
 
-// TODO: MAYBE REMOVE THIS?
-// Requested features
-// #define _GNU_SOURCE
-// #define _POSIX_C_SOURCE 200809L
-// #ifdef __STDC_NO_ATOMICS__
-// #error Current C11 compiler does not support atomic operations
-// #endif
-// External headers
-// Internal headers
+// External Headers
+#include <cstdlib>
 
+// Internal Headers
 #include <tm.hpp>
 
 #include "expect.hpp"
+#include "memory.hpp"
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
@@ -42,8 +37,22 @@
  **/
 shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) noexcept
 {
-    // TODO: tm_create(size_t, size_t)
-    return invalid_shared;
+    void *start;
+    if (unlikely(posix_memalign(&start, align, size) != 0))
+    {
+        return invalid_shared;
+    }
+
+    struct Region *region = new struct Region(size, align, start);
+    if (unlikely(region == nullptr))
+    {
+        free(start);
+        return invalid_shared;
+    }
+
+    // TODO: Some Locking Stuff ??
+
+    return region;
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -89,7 +98,7 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
  **/
-tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noexcept
+tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only) noexcept
 {
     // TODO: tm_begin(shared_t)
     return invalid_tx;
