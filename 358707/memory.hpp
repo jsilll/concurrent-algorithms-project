@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   memory.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
