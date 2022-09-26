@@ -1,6 +1,6 @@
 #include "version_lock.hpp"
 
-VersionLock::VersionLock(const VersionLock &vl)
+VersionLock::VersionLock(const VersionLock &vl) noexcept
 {
     // TODO: is this well implemented?
     vlock = vl.vlock.load();
