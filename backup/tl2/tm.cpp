@@ -10,9 +10,9 @@
 #include <unordered_set>
 #include <vector>
 
-static std::atomic_uint global_vc = 0; // global version clock
+static std::atomic_uint global_version = 0; // global version clock
 
-WordLock &getWordLock(struct region *reg, uintptr_t addr)
+WordLock &getWordLock(struct SharedRegion *reg, uintptr_t addr)
 {
     return reg->mem[addr >> 32][((addr << 32) >> 32) / reg->align];
 }
@@ -31,7 +31,7 @@ void reset_transaction()
 
 shared_t tm_create(size_t size, size_t align) noexcept
 {
-    region *region = new struct region(size, align);
+    SharedRegion *region = new struct SharedRegion(size, align);
     if (unlikely(!region))
         return invalid_shared;
     return region;
@@ -39,7 +39,7 @@ shared_t tm_create(size_t size, size_t align) noexcept
 
 void tm_destroy(shared_t shared) noexcept
 {
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
     delete reg;
 }
 
@@ -50,24 +50,24 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
 
 size_t tm_size(shared_t shared) noexcept
 {
-    return ((struct region *)shared)->size;
+    return ((struct SharedRegion *)shared)->size;
 }
 
 size_t tm_align(shared_t shared) noexcept
 {
-    return ((struct region *)shared)->align;
+    return ((struct SharedRegion *)shared)->align;
 }
 
 tx_t tm_begin([[maybe_unused]] shared_t shared, bool is_ro) noexcept
 {
-    transaction.rv = global_vc.load();
+    transaction.rv = global_version.load();
     transaction.read_only = is_ro;
     return (uintptr_t)&transaction;
 }
 
 bool tm_write(shared_t shared, [[maybe_unused]] tx_t tx, void const *source, size_t size, void *target) noexcept
 {
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
 
     for (size_t i = 0; i < size / reg->align; i++)
     {
@@ -83,7 +83,7 @@ bool tm_write(shared_t shared, [[maybe_unused]] tx_t tx, void const *source, siz
 
 bool tm_read(shared_t shared, [[maybe_unused]] tx_t tx, void const *source, size_t size, void *target) noexcept
 {
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
 
     // for each word
     for (size_t i = 0; i < size / reg->align; i++)
@@ -120,7 +120,7 @@ bool tm_read(shared_t shared, [[maybe_unused]] tx_t tx, void const *source, size
     return true;
 }
 
-void release_lock_set(region *reg, uint i)
+void release_lock_set(SharedRegion *reg, uint i)
 {
     if (i == 0)
         return;
@@ -134,7 +134,7 @@ void release_lock_set(region *reg, uint i)
     }
 }
 
-int try_acquire_sets(region *reg, uint *i)
+int try_acquire_sets(SharedRegion *reg, uint *i)
 {
     *i = 0;
     for (const auto &target_src : transaction.write_set)
@@ -151,7 +151,7 @@ int try_acquire_sets(region *reg, uint *i)
     return true;
 }
 
-bool validate_readset(region *reg)
+bool validate_readset(SharedRegion *reg)
 {
     for (const auto word : transaction.read_set)
     {
@@ -167,7 +167,7 @@ bool validate_readset(region *reg)
 }
 
 // release locks and update their version
-bool commit(region *reg)
+bool commit(SharedRegion *reg)
 {
 
     for (const auto target_src : transaction.write_set)
@@ -194,7 +194,7 @@ bool tm_end(shared_t shared, [[maybe_unused]] tx_t tx) noexcept
         return true;
     }
 
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
 
     uint tmp;
     if (!try_acquire_sets(reg, &tmp))
@@ -203,7 +203,7 @@ bool tm_end(shared_t shared, [[maybe_unused]] tx_t tx) noexcept
         return false;
     }
 
-    transaction.wv = global_vc.fetch_add(1) + 1;
+    transaction.wv = global_version.fetch_add(1) + 1;
 
     if ((transaction.rv != transaction.wv - 1) && !validate_readset(reg))
     {
@@ -217,7 +217,7 @@ bool tm_end(shared_t shared, [[maybe_unused]] tx_t tx) noexcept
 
 Alloc tm_alloc(shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] size_t size, void **target) noexcept
 {
-    struct region *reg = ((struct region *)shared);
+    struct SharedRegion *reg = ((struct SharedRegion *)shared);
     *target = (void *)(reg->seg_cnt.fetch_add(1) << 32);
     return Alloc::success;
 }

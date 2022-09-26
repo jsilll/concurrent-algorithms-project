@@ -1,64 +1,65 @@
 #include "version_lock.hpp"
 
+#include <iostream>
+
 VersionLock::VersionLock(const VersionLock &vl) noexcept
 {
     // TODO: is this well implemented?
     vlock = vl.vlock.load();
 }
 
-bool VersionLock::TryAcquire()
+bool VersionLock::acquire()
 {
-    VersionLockValue val = this->Sample();
+    Value val = this->sample();
     if (val.locked)
     {
         return false;
     }
 
-    return this->TryCompareAndSwap(true, val.version, val.lock);
+    return this->cmp_n_swap(true, val.version, val.lock);
 }
 
-bool VersionLock::Release()
+bool VersionLock::release()
 {
-    VersionLockValue val = this->Sample();
+    Value val = this->sample();
     if (!val.locked)
     {
-        // printf("[VersionLock\tRelease]: releasing unlocked lock\n");
+        std::cout << "[VersionLock\tRelease]: releasing unlocked lock" << std::endl;
         return false;
     }
 
-    return this->TryCompareAndSwap(false, val.version, val.lock);
+    return this->cmp_n_swap(false, val.version, val.lock);
 }
 
-bool VersionLock::VersionedRelease(uint64_t new_version)
+bool VersionLock::versioned_release(uint64_t new_version)
 {
-    VersionLockValue val = this->Sample();
+    Value val = this->sample();
     if (!val.locked)
     {
-        // printf("[VersionLock\tVersionedRelease]: releasing unlocked lock\n");
+        std::cout << "[VersionLock\tVersionedRelease]: releasing unlocked lock" << std::endl;
         return false;
     }
 
-    return this->TryCompareAndSwap(false, new_version, val.lock);
+    return this->cmp_n_swap(false, new_version, val.lock);
 }
 
-VersionLockValue VersionLock::Sample()
+VersionLock::Value VersionLock::sample()
 {
     uint64_t current = vlock.load();
-    return Parse(current);
+    return parse(current);
 }
 
-bool VersionLock::TryCompareAndSwap(bool do_lock, uint64_t desired_version,
-                                    uint64_t compare_to)
+bool VersionLock::cmp_n_swap(bool do_lock, uint64_t desired_version, uint64_t compare_to)
 {
-    uint64_t new_lock = Serialize(do_lock, desired_version);
+    uint64_t new_lock = serialize(do_lock, desired_version);
     return this->vlock.compare_exchange_strong(compare_to, new_lock);
 }
 
-uint64_t VersionLock::Serialize(bool locked, uint64_t version)
+uint64_t VersionLock::serialize(bool locked, uint64_t version)
 {
     if ((version >> 63) == 1)
     {
-        // printf("[VersionLock\tSerialize]: version overflow\n");
+        std::cout << "[VersionLock\tSerialize]: version overflow" << std::endl;
         throw -1;
     }
 
@@ -69,7 +70,7 @@ uint64_t VersionLock::Serialize(bool locked, uint64_t version)
     return version;
 }
 
-VersionLockValue VersionLock::Parse(uint64_t serialized)
+VersionLock::Value VersionLock::parse(uint64_t serialized)
 {
     uint64_t version = (((uint64_t)1 << 63) - 1) & serialized;
     uint64_t locked_bit = serialized >> 63;

@@ -78,8 +78,7 @@ struct Region
      * @param a
      * @param st
      */
-    Region(size_t s, size_t a, void *st) : size(s), align(a), start(st)
+    Region(size_t s, size_t a) : size(s), align(a)
     {
-        ::std::memset(start, 0, size);
     }
 };

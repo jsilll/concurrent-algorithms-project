@@ -24,6 +24,7 @@
 // External Headers
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 
 // Internal Headers
 #include <tm.hpp>
@@ -32,92 +33,17 @@
 #include "memory.hpp"
 #include "version_lock.hpp"
 
-// Merdas Necessarias (ou nao ;) )
+/**
+ * @brief Global version clock
+ *
+ */
+static std::atomic_uint global_version{};
 
-static std::atomic_uint global_vc{}; // global version clock
-
-WordLock &getWordLock(struct region *reg, uintptr_t addr)
-{
-    return reg->mem[addr >> 32][((addr << 32) >> 32) / reg->align];
-}
-
-void reset_transaction()
-{
-    transaction.rv = 0;
-    transaction.read_only = false;
-    for (const auto &ptr : transaction.write_set)
-    {
-        free(ptr.second);
-    }
-    transaction.write_set.clear();
-    transaction.read_set.clear();
-}
-
-void release_lock_set(region *reg, uint i)
-{
-    if (i == 0)
-        return;
-    for (const auto &target_src : transaction.write_set)
-    {
-        WordLock &wl = getWordLock(reg, target_src.first);
-        wl.vlock.Release();
-        if (i <= 1)
-            break;
-        i--;
-    }
-}
-
-int try_acquire_sets(region *reg, uint *i)
-{
-    *i = 0;
-    for (const auto &target_src : transaction.write_set)
-    {
-        WordLock &wl = getWordLock(reg, target_src.first);
-        bool acquired = wl.vlock.TryAcquire();
-        if (!acquired)
-        {
-            release_lock_set(reg, *i);
-            return false;
-        }
-        *i = *i + 1;
-    }
-    return true;
-}
-
-bool validate_readset(region *reg)
-{
-    for (const auto word : transaction.read_set)
-    {
-        WordLock &wl = getWordLock(reg, (uintptr_t)word);
-        VersionLockValue val = wl.vlock.Sample();
-        if ((val.locked) || val.version > transaction.rv)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// release locks and update their version
-bool commit(region *reg)
-{
-
-    for (const auto target_src : transaction.write_set)
-    {
-        WordLock &wl = getWordLock(reg, target_src.first);
-        memcpy(&wl.word, target_src.second, reg->align);
-        if (!wl.vlock.VersionedRelease(transaction.wv))
-        {
-            // printf("[Commit]: VersionedRelease failed\n");
-            reset_transaction();
-            return false;
-        }
-    }
-
-    reset_transaction();
-    return true;
-}
+/**
+ * @brief This variable stores the information about
+ * the current transaction being processed
+ */
+static thread_local Transaction transaction;
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
@@ -126,13 +52,14 @@ bool commit(region *reg)
  **/
 shared_t tm_create(size_t size, size_t align) noexcept
 {
-    region *region = new struct region(size, align);
-    if (unlikely(!region))
+    try
+    {
+        return new struct SharedRegion(size, align);
+    }
+    catch (std::bad_alloc &e)
     {
         return invalid_shared;
-    }
-
-    return region;
+    };
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -140,8 +67,7 @@ shared_t tm_create(size_t size, size_t align) noexcept
  **/
 void tm_destroy([[maybe_unused]] shared_t shared) noexcept
 {
-    struct region *reg = (struct region *)shared;
-    delete reg;
+    delete static_cast<struct SharedRegion *>(shared);
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -150,7 +76,7 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
  **/
 void *tm_start([[maybe_unused]] shared_t shared) noexcept
 {
-    return (void *)((uint64_t)1 << 32);
+    return static_cast<struct SharedRegion *>(shared)->start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -159,7 +85,7 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_size([[maybe_unused]] shared_t shared) noexcept
 {
-    return ((struct region *)shared)->size;
+    return static_cast<struct SharedRegion *>(shared)->size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
@@ -168,7 +94,7 @@ size_t tm_size([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_align([[maybe_unused]] shared_t shared) noexcept
 {
-    return ((struct region *)shared)->align;
+    return static_cast<struct SharedRegion *>(shared)->align;
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -178,9 +104,9 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  **/
 tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noexcept
 {
-    transaction.rv = global_vc.load();
-    transaction.read_only = is_ro;
-    return (uintptr_t)&transaction;
+    transaction.is_ro = is_ro;
+    transaction.rv = global_version.load();
+    return reinterpret_cast<uintptr_t>(&transaction);
 }
 
 /** [thread-safe] End the given transaction.
@@ -190,31 +116,30 @@ tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noe
  **/
 bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
 {
-    if (transaction.read_only || transaction.write_set.empty())
+    if (transaction.is_ro)
     {
-        reset_transaction();
+        transaction = {};
         return true;
     }
 
-    struct region *reg = (struct region *)shared;
-
     uint tmp;
-    if (!try_acquire_sets(reg, &tmp))
+    auto *reg = static_cast<struct SharedRegion *>(shared);
+    if (!reg->try_acquire_sets(&tmp, transaction))
     {
-        reset_transaction();
+        transaction = {};
         return false;
     }
 
-    transaction.wv = global_vc.fetch_add(1) + 1;
+    transaction.wv = global_version.fetch_add(1) + 1;
 
-    if ((transaction.rv != transaction.wv - 1) && !validate_readset(reg))
+    if ((transaction.rv != transaction.wv - 1) && !reg->validate_readset(transaction))
     {
-        release_lock_set(reg, tmp);
-        reset_transaction();
+        reg->release_lock_set(tmp, transaction);
+        transaction = {};
         return false;
     }
 
-    return commit(reg);
+    return reg->commit(transaction);
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -227,16 +152,16 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  **/
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
 
     // for each word
     for (size_t i = 0; i < size / reg->align; i++)
     {
         uintptr_t word_addr = (uintptr_t)source + reg->align * i;
-        WordLock &word = getWordLock(reg, word_addr);                     // shared
+        WordLock &word = (*reg)[word_addr];                               // shar];
         void *target_word = (void *)((uintptr_t)target + reg->align * i); // private
 
-        if (!transaction.read_only)
+        if (!transaction.is_ro)
         {
             auto it = transaction.write_set.find(word_addr); // O(logn)
             if (it != transaction.write_set.end())
@@ -246,17 +171,17 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
             }
         }
 
-        VersionLockValue prev_val = word.vlock.Sample();
+        VersionLock::Value prev_val = word.vlock.sample();
         memcpy(target_word, &word.word, reg->align); // read word
-        VersionLockValue post_val = word.vlock.Sample();
+        VersionLock::Value post_val = word.vlock.sample();
 
         if (post_val.locked || (prev_val.version != post_val.version) || (prev_val.version > transaction.rv))
         {
-            reset_transaction();
+            transaction = {};
             return false;
         }
 
-        if (!transaction.read_only)
+        if (!transaction.is_ro)
         {
             transaction.read_set.emplace((void *)word_addr);
         }
@@ -275,7 +200,7 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  **/
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    struct region *reg = (struct region *)shared;
+    struct SharedRegion *reg = (struct SharedRegion *)shared;
 
     for (size_t i = 0; i < size / reg->align; i++)
     {
@@ -298,7 +223,7 @@ bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[mayb
  **/
 Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] size_t size, [[maybe_unused]] void **target) noexcept
 {
-    struct region *reg = ((struct region *)shared);
+    struct SharedRegion *reg = ((struct SharedRegion *)shared);
     *target = (void *)(reg->seg_cnt.fetch_add(1) << 32);
     return Alloc::success;
 }
