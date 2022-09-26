@@ -29,28 +29,41 @@
 
 #include "expect.hpp"
 #include "memory.hpp"
+#include "version_lock.hpp"
+
+// Merdas Necessarias (ou nao ;) )
+
+static std::atomic_uint global_vc = 0; // global version clock
+
+WordLock &getWordLock(struct region *reg, uintptr_t addr)
+{
+    return reg->mem[addr >> 32][((addr << 32) >> 32) / reg->align];
+}
+
+void reset_transaction()
+{
+    transaction.rv = 0;
+    transaction.read_only = false;
+    for (const auto &ptr : transaction.write_set)
+    {
+        free(ptr.second);
+    }
+    transaction.write_set.clear();
+    transaction.read_set.clear();
+}
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
  **/
-shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) noexcept
+shared_t tm_create(size_t size, size_t align) noexcept
 {
-    void *start;
-    if (unlikely(posix_memalign(&start, align, size) != 0))
+    region *region = new struct region(size, align);
+    if (unlikely(!region))
     {
         return invalid_shared;
     }
-
-    struct Region *region = new struct Region(size, align, start);
-    if (unlikely(region == nullptr))
-    {
-        free(start);
-        return invalid_shared;
-    }
-
-    // TODO: Some Locking Stuff ??
 
     return region;
 }
@@ -60,7 +73,8 @@ shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) 
  **/
 void tm_destroy([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: tm_destroy(shared_t)
+    struct region *reg = (struct region *)shared;
+    delete reg;
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -69,8 +83,7 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
  **/
 void *tm_start([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: tm_start(shared_t)
-    return NULL;
+    return (void *)((uint64_t)1 << 32);
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -79,8 +92,7 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_size([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: tm_size(shared_t)
-    return 0;
+    return ((struct region *)shared)->size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
@@ -89,8 +101,7 @@ size_t tm_size([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_align([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: tm_align(shared_t)
-    return 0;
+    return ((struct region *)shared)->align;
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -98,10 +109,11 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
  **/
-tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only) noexcept
+tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noexcept
 {
-    // TODO: tm_begin(shared_t)
-    return invalid_tx;
+    transaction.rv = global_vc.load();
+    transaction.read_only = is_ro;
+    return (uintptr_t)&transaction;
 }
 
 /** [thread-safe] End the given transaction.

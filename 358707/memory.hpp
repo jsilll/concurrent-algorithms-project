@@ -1,85 +1,44 @@
-/**
- * @file   memory.hpp
- * @author João Silveira <joao.freixialsilveira@epfl.ch>
- *
- * @section LICENSE
- *
- * Copyright © 2018-2021 Sébastien Rouault.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * any later version. Please see https://gnu.org/licenses/gpl.html
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * @section DESCRIPTION
- *
- * Definition of the STM's memory layout.
- **/
-
 #pragma once
 
-// External Headers
-#include <cstring>
+#include <atomic>
+#include <map>
+#include <unordered_set>
+#include <vector>
 
-// Internal Headers
-#include <tm.hpp>
+#include "version_lock.hpp"
 
-/**
- * @brief List of dynamically allocated segments.
- */
-struct SegmentNode
+struct target_src
 {
-    struct SegmentNode *prev;
-    struct SegmentNode *next;
-    // TODO: ? uint8_t segment[] // segment of dynamic size
+    uintptr_t target;
+    void *src;
 };
 
-using SegmentList = SegmentNode *;
+struct Transaction
+{
+    std::unordered_set<void *> read_set;   // set of read words
+    std::map<uintptr_t, void *> write_set; // target word -> src word
+    uint64_t rv;                           // read-version
+    uint64_t wv;                           // write-version
+    bool read_only = false;
+};
+
+static thread_local Transaction transaction;
+
+struct WordLock
+{
+    VersionLock vlock;
+    uint64_t word = 0;
+};
 
 /**
- * @brief Simple Shared Memory Region (a.k.a Transactional Memory).
+ * @brief Shared Memory Region
+ *
  */
-struct Region
+struct region
 {
-    /**
-     * @brief Size of the non-deallocable memory segment
-     * (in bytes)
-     */
-    size_t size;
-
-    /**
-     * @brief Size of a word in the shared memory region
-     * (in bytes)
-     */
-    size_t align;
-
-    /**
-     * @brief Start of the shared memory region
-     * (i.e., of the non-deallocable memory segment)
-     */
-    void *start;
-
-    /**
-     * @brief Shared memory segments dynamically
-     * allocated via tm_alloc within transactions
-     */
-    SegmentList allocs{};
-
-    /**
-     * @brief Construct a new Region struct
-     * Initializes the non-deallocable memory segment
-     *
-     * @param s
-     * @param a
-     * @param st
-     */
-    Region(size_t s, size_t a, void *st) : size(s), align(a), start(st)
-    {
-        ::std::memset(start, 0, size);
-    }
+    size_t size;  // Size of the non-deallocable memory segment (in bytes)
+    size_t align; // Size of a word in the shared memory region (in bytes)
+    std::atomic_uint64_t seg_cnt = 2;
+    std::vector<std::vector<WordLock>> mem;
+    region(size_t size, size_t align) : size(size), align(align), mem(500, std::vector<WordLock>(1500)) {}
 };
