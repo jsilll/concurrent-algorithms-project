@@ -22,18 +22,26 @@
  **/
 
 // External Headers
-#include <algorithm>
 #include <cstdlib>
+#include <cstring>
+#include <iostream>
 
 // Internal Headers
 #include <tm.hpp>
 
 #include "expect.hpp"
 #include "memory.hpp"
-#include "transaction.hpp"
+#include "version_lock.hpp"
 
 /**
- * @brief Current transaction being run
+ * @brief Global version clock
+ *
+ */
+static std::atomic_uint global_version{};
+
+/**
+ * @brief This variable stores the information about
+ * the current transaction being processed
  */
 static thread_local Transaction transaction;
 
@@ -42,16 +50,16 @@ static thread_local Transaction transaction;
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
  **/
-shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) noexcept
+shared_t tm_create(size_t size, size_t align) noexcept
 {
     try
     {
-        return new SharedRegion(size, align);
+        return new struct SharedRegion(size, align);
     }
-    catch (const std::exception &e)
+    catch (std::bad_alloc &e)
     {
         return invalid_shared;
-    }
+    };
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -59,7 +67,7 @@ shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) 
  **/
 void tm_destroy([[maybe_unused]] shared_t shared) noexcept
 {
-    delete static_cast<SharedRegion *>(shared); // this will call ~SharedRegion()
+    delete static_cast<struct SharedRegion *>(shared);
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -68,8 +76,7 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
  **/
 void *tm_start([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
-    return static_cast<SharedRegion *>(shared)->start;
+    return static_cast<struct SharedRegion *>(shared)->start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -78,8 +85,7 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_size([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
-    return static_cast<SharedRegion *>(shared)->size;
+    return static_cast<struct SharedRegion *>(shared)->size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
@@ -88,8 +94,7 @@ size_t tm_size([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_align([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
-    return static_cast<SharedRegion *>(shared)->align;
+    return static_cast<struct SharedRegion *>(shared)->align;
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -97,11 +102,11 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
  **/
-tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only) noexcept
+tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noexcept
 {
-    // TODO: make it thread safe
-    transaction.read_only = read_only;
-    return reinterpret_cast<tx_t>(&transaction);
+    transaction.is_ro = is_ro;
+    transaction.rv = global_version.load();
+    return reinterpret_cast<uintptr_t>(&transaction);
 }
 
 /** [thread-safe] End the given transaction.
@@ -111,8 +116,30 @@ tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only)
  **/
 bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
 {
-    // TODO: make it thread safe
-    return true;
+    if (transaction.is_ro)
+    {
+        transaction = {};
+        return true;
+    }
+
+    uint tmp;
+    auto *reg = static_cast<struct SharedRegion *>(shared);
+    if (!reg->try_acquire_sets(&tmp, transaction))
+    {
+        transaction = {};
+        return false;
+    }
+
+    transaction.wv = global_version.fetch_add(1) + 1;
+
+    if ((transaction.rv != transaction.wv - 1) && !reg->validate_readset(transaction))
+    {
+        reg->release_lock_set(tmp, transaction);
+        transaction = {};
+        return false;
+    }
+
+    return reg->commit(transaction);
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -125,7 +152,40 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  **/
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    std::memcpy(target, source, size);
+    struct SharedRegion *reg = static_cast<struct SharedRegion *>(shared);
+
+    for (size_t i = 0; i < (size / reg->align); i++)
+    {
+        uintptr_t word_addr = (uintptr_t)source + reg->align * i;
+        WordLock &word = (*reg)[word_addr];
+        void *target_word = (void *)((uintptr_t)target + reg->align * i); // private
+
+        if (!transaction.is_ro)
+        {
+            auto it = transaction.write_set.find(word_addr); // O(logn)
+            if (it != transaction.write_set.end())
+            { // found in write-set
+                memcpy(target_word, it->second, reg->align);
+                continue;
+            }
+        }
+
+        VersionLock::Value prev_val = word.vlock.sample();
+        memcpy(target_word, &word.word, reg->align); // read word
+        VersionLock::Value post_val = word.vlock.sample();
+
+        if (post_val.locked || (prev_val.version != post_val.version) || (prev_val.version > transaction.rv))
+        {
+            transaction = {};
+            return false;
+        }
+
+        if (!transaction.is_ro)
+        {
+            transaction.read_set.emplace((void *)word_addr);
+        }
+    }
+
     return true;
 }
 
@@ -139,8 +199,17 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  **/
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
-    std::memcpy(target, source, size);
+    struct SharedRegion *reg = static_cast<struct SharedRegion *>(shared);
+
+    for (size_t i = 0; i < (size / reg->align); i++)
+    {
+        uintptr_t target_word = (uintptr_t)target + reg->align * i;    // shared
+        void *src_word = (void *)((uintptr_t)source + reg->align * i); // private
+        void *src_copy = malloc(reg->align);                           // be sure to free this
+        memcpy(src_copy, src_word, reg->align);
+        transaction.write_set[target_word] = src_copy; // target->src
+    }
+
     return true;
 }
 
@@ -153,38 +222,18 @@ bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[mayb
  **/
 Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] size_t size, [[maybe_unused]] void **target) noexcept
 {
-    try
-    {
-        auto region = static_cast<SharedRegion *>(shared);
-        auto node = new SegmentNode(region->align, size);
-        region->PushNode(node);
-        *target = node->segment;
-        return Alloc::success;
-    }
-    catch (const std::exception &e)
-    {
-        return Alloc::nomem;
-    }
+    struct SharedRegion *reg = ((struct SharedRegion *)shared);
+    *target = (void *)(reg->seg_cnt.fetch_add(1) << 32);
+    return Alloc::success;
 }
 
 /** [thread-safe] Memory freeing in the given transaction.
  * @param shared Shared memory region associated with the transaction
  * @param tx     Transaction to use
- * @param segment Address of the first byte of the previously allocated segment to deallocate
+ * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
  **/
-bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
+bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *target) noexcept
 {
-    auto node = reinterpret_cast<SegmentNode *>(reinterpret_cast<uintptr_t>(segment) - sizeof(SegmentNode));
-
-    // Check to see if this is the first node the linked list
-    if (unlikely(node->prev == nullptr))
-    {
-        auto region = static_cast<SharedRegion *>(shared);
-        region->PopNode();
-    }
-
-    delete node; // this will call ~SegmentNode
-
     return true;
 }

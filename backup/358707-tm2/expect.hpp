@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   expect.cpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -16,49 +16,30 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  *
- * @section DESCRIPTION
- *
- * Definition of the STM's memory layout.
  **/
 
 #pragma once
 
-// External Headers
-#include <new>
-#include <cstring>
-#include <cstdlib>
-
-// Internal Headers
-#include <tm.hpp>
+#ifdef __GNUC__
+/**
+ * @brief Define a proposition as likely true.
+ *
+ * @param prop
+ * @return long
+ */
+inline long likely(long prop)
+{
+    return __builtin_expect(prop, true);
+}
 
 /**
- * @brief Doubly-Linked List segment.
+ * @brief Define a proposition as likely false.
+ *
+ * @param prop
+ * @return long
  */
-struct SegmentNode
+inline long unlikely(long prop)
 {
-    struct SegmentNode *prev{};
-    struct SegmentNode *next{};
-
-    void *segment;
-
-    explicit SegmentNode(size_t s, size_t a);
-    ~SegmentNode();
-};
-
-/**
- * @brief Shared Memory Region.
- */
-struct SharedRegion
-{
-    size_t size;
-    size_t align;
-
-    void *start;
-    SegmentNode *allocs_head{};
-
-    explicit SharedRegion(size_t s, size_t a);
-    ~SharedRegion();
-
-    void PushNode(SegmentNode *node);
-    void PopNode();
-};
+    return __builtin_expect(prop, false);
+}
+#endif

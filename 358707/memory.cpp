@@ -1,88 +1,97 @@
+/**
+ * @file   tm.cpp
+ * @author João Silveira <joao.freixialsilveira@epfl.ch>
+ *
+ * @section LICENSE
+ *
+ * Copyright © 2018-2021 Sébastien Rouault.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * any later version. Please see https://gnu.org/licenses/gpl.html
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * @section DESCRIPTION
+ *
+ * Implementation of the STM's memory layout.
+ **/
+
+#include "expect.hpp"
 #include "memory.hpp"
 
-#include <cstring>
-#include <iostream>
-
-WordLock &SharedRegion::operator[](uintptr_t addr)
+SegmentNode::SegmentNode(size_t s, size_t a)
 {
-    return mem[addr >> 32];
+    segment = std::aligned_alloc(a, s);
+
+    if (unlikely(segment == nullptr))
+    {
+        throw std::bad_alloc();
+    }
+
+    std::memset(segment, 0, s);
 }
 
-/**
- * @brief Releases the lock set of
- * the first i words
- *
- * @param reg
- * @param i
- */
-void SharedRegion::release_lock_set(uint32_t i, Transaction transaction)
+SegmentNode::~SegmentNode()
 {
-    if (i == 0)
+    if (prev)
     {
-        return;
+        prev->next = next;
     }
 
-    for (const auto &target_src : transaction.write_set)
+    if (next)
     {
-        WordLock &wl = (*this)[target_src.first];
-        wl.vlock.release();
-        if (i <= 1)
-        {
-            break;
-        }
-
-        i--;
+        next->prev = prev;
     }
+
+    std::free(segment);
 }
 
-int SharedRegion::try_acquire_sets(uint *i, Transaction transaction)
+SharedRegion::SharedRegion(size_t s, size_t a)
+    : size(s), align(a)
 {
-    *i = 0;
-    for (const auto &target_src : transaction.write_set)
-    {
-        WordLock &wl = (*this)[target_src.first];
-        bool acquired = wl.vlock.acquire();
-        if (!acquired)
-        {
-            release_lock_set(*i, transaction);
-            return false;
-        }
+    start = std::aligned_alloc(a, s);
 
-        *i = *i + 1;
+    if (unlikely(start == nullptr))
+    {
+        throw std::bad_alloc();
     }
 
-    return true;
+    std::memset(start, 0, s);
 }
 
-bool SharedRegion::validate_readset(Transaction transaction)
+SharedRegion::~SharedRegion()
 {
-    for (const auto word : transaction.read_set)
+    while (allocs_head)
     {
-        WordLock &wl = (*this)[(uintptr_t)word];
-        VersionLock::Value val = wl.vlock.sample();
-        if ((val.locked) || val.version > transaction.rv)
-        {
-            return false;
-        }
+        SegmentNode *head = allocs_head->next;
+        delete allocs_head;
+        allocs_head = head;
     }
 
-    return true;
+    // Here we have to use free() because
+    // 'delete void*' is undefined behaviour
+    std::free(start);
 }
 
-bool SharedRegion::commit(Transaction transaction)
+void SharedRegion::PushNode(SegmentNode *node)
 {
-    for (const auto target_src : transaction.write_set)
+    node->next = allocs_head;
+    if (node->next)
     {
-        WordLock &wl = (*this)[target_src.first];
-        memcpy(&wl.word, target_src.second, align);
-        if (!wl.vlock.versioned_release(transaction.wv))
-        {
-            std::cout << "[Commit]: versioned_release failed" << std::endl;
-            transaction = {};
-            return false;
-        }
+        node->next->prev = node;
     }
+    allocs_head = node;
+}
 
-    transaction = {};
-    return true;
+void SharedRegion::PopNode()
+{
+    if (allocs_head)
+    {
+        allocs_head = allocs_head->next;
+    }
 }
