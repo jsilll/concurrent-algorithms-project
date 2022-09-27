@@ -30,10 +30,9 @@
  */
 struct SegmentNode
 {
+    void *start;
     struct SegmentNode *prev{};
     struct SegmentNode *next{};
-
-    void *start;
 
     explicit SegmentNode(size_t s, size_t a);
     ~SegmentNode();

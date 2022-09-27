@@ -179,7 +179,7 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
 bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
 {
     // TODO: fix me ??
-    auto node = reinterpret_cast<SegmentNode *>(reinterpret_cast<uintptr_t>(segment) - (2 * sizeof(SegmentNode *)));
+    auto node = reinterpret_cast<SegmentNode *>(segment);
 
     // Check to see if this is the first node the linked list
     if (unlikely(node->prev == nullptr))
