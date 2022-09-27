@@ -21,13 +21,13 @@
  * Implementation of the STM.
  **/
 
-// External Headers
-#include <algorithm>
-#include <cstdlib>
-
-// Internal Headers
 #include <tm.hpp>
 
+// External Headers
+#include <cstring>
+#include <exception>
+
+// Internal Headers
 #include "expect.hpp"
 #include "memory.hpp"
 #include "transaction.hpp"
@@ -156,9 +156,9 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
     try
     {
         auto region = static_cast<SharedRegion *>(shared);
-        auto node = new SegmentNode(region->align, size);
-        region->PushNode(node);
-        *target = node->segment;
+        auto node = new SegmentNode(size, region->align);
+        region->PushSegmentNode(node);
+        *target = node->start;
         return Alloc::success;
     }
     catch (const std::exception &e)
@@ -173,15 +173,18 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
  * @param segment Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
  **/
+
+#include <iostream>
+
 bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
 {
-    auto node = reinterpret_cast<SegmentNode *>(reinterpret_cast<uintptr_t>(segment) - sizeof(SegmentNode));
+    // TODO: fix me ??
+    auto node = reinterpret_cast<SegmentNode *>(reinterpret_cast<uintptr_t>(segment) - (2 * sizeof(SegmentNode *)));
 
     // Check to see if this is the first node the linked list
     if (unlikely(node->prev == nullptr))
     {
-        auto region = static_cast<SharedRegion *>(shared);
-        region->PopNode();
+        static_cast<SharedRegion *>(shared)->PopSegmentNode();
     }
 
     delete node; // this will call ~SegmentNode

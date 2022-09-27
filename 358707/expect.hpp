@@ -42,4 +42,14 @@ inline long unlikely(long prop)
 {
     return __builtin_expect(prop, false);
 }
+#else
+bool likely(bool prop)
+{
+    return prop;
+}
+
+bool unlikely(bool prop)
+{
+    return prop;
+}
 #endif

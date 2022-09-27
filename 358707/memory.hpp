@@ -23,23 +23,17 @@
 
 #pragma once
 
-// External Headers
-#include <new>
-#include <cstring>
-#include <cstdlib>
-
-// Internal Headers
 #include <tm.hpp>
 
 /**
- * @brief Doubly-Linked List segment.
+ * @brief Doubly-Linked List Segment.
  */
 struct SegmentNode
 {
     struct SegmentNode *prev{};
     struct SegmentNode *next{};
 
-    void *segment;
+    void *start;
 
     explicit SegmentNode(size_t s, size_t a);
     ~SegmentNode();
@@ -59,6 +53,6 @@ struct SharedRegion
     explicit SharedRegion(size_t s, size_t a);
     ~SharedRegion();
 
-    void PushNode(SegmentNode *node);
-    void PopNode();
+    void PushSegmentNode(SegmentNode *node);
+    void PopSegmentNode();
 };

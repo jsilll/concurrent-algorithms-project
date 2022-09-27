@@ -21,34 +21,41 @@
  * Implementation of the STM's memory layout.
  **/
 
-#include "expect.hpp"
 #include "memory.hpp"
+
+// External Headers
+#include <new>
+#include <cstring>
+#include <cstdlib>
+
+// Internal Headers
+#include "expect.hpp"
 
 SegmentNode::SegmentNode(size_t s, size_t a)
 {
-    segment = std::aligned_alloc(a, s);
+    start = std::aligned_alloc(a, s);
 
-    if (unlikely(segment == nullptr))
+    if (unlikely(start == nullptr))
     {
         throw std::bad_alloc();
     }
 
-    std::memset(segment, 0, s);
+    std::memset(start, 0, s);
 }
 
 SegmentNode::~SegmentNode()
 {
-    if (prev)
+    if (prev != nullptr)
     {
         prev->next = next;
     }
 
-    if (next)
+    if (next != nullptr)
     {
         next->prev = prev;
     }
 
-    std::free(segment);
+    std::free(start);
 }
 
 SharedRegion::SharedRegion(size_t s, size_t a)
@@ -68,27 +75,27 @@ SharedRegion::~SharedRegion()
 {
     while (allocs_head)
     {
-        SegmentNode *head = allocs_head->next;
+        SegmentNode *tail = allocs_head->next;
         delete allocs_head;
-        allocs_head = head;
+        allocs_head = tail;
     }
 
-    // Here we have to use free() because
-    // 'delete void*' is undefined behaviour
     std::free(start);
 }
 
-void SharedRegion::PushNode(SegmentNode *node)
+void SharedRegion::PushSegmentNode(SegmentNode *node)
 {
     node->next = allocs_head;
+
     if (node->next)
     {
         node->next->prev = node;
     }
+
     allocs_head = node;
 }
 
-void SharedRegion::PopNode()
+void SharedRegion::PopSegmentNode()
 {
     if (allocs_head)
     {
