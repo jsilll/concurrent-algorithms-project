@@ -24,6 +24,7 @@
 #include <tm.hpp>
 
 // External Headers
+#include <atomic>
 #include <cstring>
 #include <exception>
 
@@ -31,6 +32,12 @@
 #include "expect.hpp"
 #include "memory.hpp"
 #include "transaction.hpp"
+
+/**
+ * @brief Global version clock, as described in TL2
+ *
+ */
+static std::atomic_uint global_version{};
 
 /**
  * @brief Current transaction being run
@@ -69,7 +76,7 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
 void *tm_start([[maybe_unused]] shared_t shared) noexcept
 {
     // TODO: make it thread safe
-    return static_cast<SharedRegion *>(shared)->start;
+    return static_cast<SharedRegion *>(shared)->first.data;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -126,6 +133,7 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
     // TODO: make it thread safe
+    // auto segment = reinterpret_cast<Segment*>(source);
     std::memcpy(target, source, size);
     return true;
 }
@@ -158,9 +166,9 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
     try
     {
         auto region = static_cast<SharedRegion *>(shared);
-        auto node = new SegmentNode(size, region->align);
-        region->PushSegmentNode(node);
-        *target = node->start;
+        auto node = new DoublyLinkedList<Segment>::Node(size, region->align);
+        region->allocs.Push(node);
+        *target = node->content.data;
         return Alloc::success;
     }
     catch (const std::exception &e)
@@ -181,12 +189,12 @@ bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
     // TODO: make it thread safe
 
     // Garanteed by C/C++ std. to work
-    auto node = reinterpret_cast<SegmentNode *>(segment);
+    auto node = reinterpret_cast<DoublyLinkedList<Segment>::Node *>(segment);
 
     // Check to see if this is the first node the linked list of SharedRegion
     if (node->prev == nullptr)
     {
-        static_cast<SharedRegion *>(shared)->PopSegmentNode();
+        static_cast<SharedRegion *>(shared)->allocs.Pop();
     }
 
     delete node;

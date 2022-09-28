@@ -31,74 +31,24 @@
 // Internal Headers
 #include "expect.hpp"
 
-SegmentNode::SegmentNode(size_t s, size_t a)
+Segment::Segment(size_t s, size_t a)
 {
-    start = std::aligned_alloc(a, s);
+    data = std::aligned_alloc(a, s);
 
-    if (unlikely(start == nullptr))
+    if (unlikely(data == nullptr))
     {
         throw std::bad_alloc();
     }
 
-    std::memset(start, 0, s);
+    std::memset(data, 0, s);
 }
 
-SegmentNode::~SegmentNode()
+Segment::~Segment()
 {
-    if (prev != nullptr)
-    {
-        prev->next = next;
-    }
-
-    if (next != nullptr)
-    {
-        next->prev = prev;
-    }
-
-    std::free(start);
+    std::free(data);
 }
 
 SharedRegion::SharedRegion(size_t s, size_t a)
-    : size(s), align(a)
+    : size(s), align(a), first(s, a)
 {
-    start = std::aligned_alloc(a, s);
-
-    if (unlikely(start == nullptr))
-    {
-        throw std::bad_alloc();
-    }
-
-    std::memset(start, 0, s);
-}
-
-SharedRegion::~SharedRegion()
-{
-    while (allocs_head)
-    {
-        SegmentNode *tail = allocs_head->next;
-        delete allocs_head;
-        allocs_head = tail;
-    }
-
-    std::free(start);
-}
-
-void SharedRegion::PushSegmentNode(SegmentNode *node)
-{
-    node->next = allocs_head;
-
-    if (node->next)
-    {
-        node->next->prev = node;
-    }
-
-    allocs_head = node;
-}
-
-void SharedRegion::PopSegmentNode()
-{
-    if (allocs_head)
-    {
-        allocs_head = allocs_head->next;
-    }
 }

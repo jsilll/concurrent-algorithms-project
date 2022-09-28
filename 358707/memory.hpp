@@ -25,17 +25,21 @@
 
 #include <tm.hpp>
 
-/**
- * @brief Doubly-Linked List Segment.
- */
-struct SegmentNode
-{
-    void *start;
-    struct SegmentNode *prev{};
-    struct SegmentNode *next{};
+// Internal Headers
+#include "spin_lock.hpp"
+#include "doubly_linked_list.hpp"
 
-    explicit SegmentNode(size_t s, size_t a);
-    ~SegmentNode();
+/**
+ * @brief Segment of Memory
+ *
+ */
+struct Segment
+{
+    void *data{};
+    SpinLock vlock;
+
+    explicit Segment(size_t s, size_t a);
+    ~Segment();
 };
 
 /**
@@ -45,13 +49,9 @@ struct SharedRegion
 {
     size_t size;
     size_t align;
-
-    void *start;
-    SegmentNode *allocs_head{};
+    Segment first;
+    DoublyLinkedList<Segment> allocs{};
 
     explicit SharedRegion(size_t s, size_t a);
     ~SharedRegion();
-
-    void PushSegmentNode(SegmentNode *node);
-    void PopSegmentNode();
 };

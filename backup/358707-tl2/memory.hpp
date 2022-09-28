@@ -47,7 +47,7 @@ struct WordLock
  */
 struct SharedRegion
 {
-    void *start{};                   // Start of the non-deallocable memory segment
+    void *fixed_segment{};           // Start of the non-deallocable memory segment
     size_t size{};                   // Size of the non-deallocable memory segment (in bytes)
     size_t align{};                  // Size of a word in the shared memory SharedRegion (in bytes)
     std::vector<WordLock> mem;       // Memory
