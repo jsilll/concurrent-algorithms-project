@@ -43,12 +43,12 @@ inline long unlikely(long prop)
     return __builtin_expect(prop, false);
 }
 #else
-inline bool likely(bool prop)
+inline long likely(long prop)
 {
     return prop;
 }
 
-inline bool unlikely(bool prop)
+inline long unlikely(long prop)
 {
     return prop;
 }

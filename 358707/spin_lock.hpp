@@ -10,8 +10,8 @@
 class SpinLock
 {
 private:
-    uint32_t version{};
-    std::atomic<bool> locked{};
+    uint32_t version_{};
+    std::atomic<bool> locked_{};
 
 public:
     void Lock();

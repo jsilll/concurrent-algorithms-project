@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdlib>
 #include <utility>
+#include <iostream>
 
 template <typename T>
 class DoublyLinkedList
@@ -37,11 +39,11 @@ private:
 public:
     ~DoublyLinkedList()
     {
-        while (head_)
+        while (head_ != nullptr)
         {
-            Node *tail = head_->next;
+            Node *head = head_->next;
             delete head_;
-            head_ = tail;
+            head_ = head;
         }
     }
 
@@ -49,7 +51,7 @@ public:
     {
         node->next = head_;
 
-        if (node->next)
+        if (node->next != nullptr)
         {
             node->next->prev = node;
         }
@@ -60,7 +62,7 @@ public:
     Node *Pop()
     {
         Node *res = head_;
-        if (head_)
+        if (head_ != nullptr)
         {
             head_ = head_->next;
         }

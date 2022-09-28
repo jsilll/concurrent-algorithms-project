@@ -38,7 +38,7 @@ struct Segment
     void *data{};
     SpinLock vlock;
 
-    explicit Segment(size_t s, size_t a);
+    Segment(size_t s, size_t a);
     ~Segment();
 };
 
@@ -52,6 +52,5 @@ struct SharedRegion
     Segment first;
     DoublyLinkedList<Segment> allocs{};
 
-    explicit SharedRegion(size_t s, size_t a);
-    ~SharedRegion();
+    SharedRegion(size_t s, size_t a);
 };

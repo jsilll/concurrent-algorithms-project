@@ -5,7 +5,7 @@ void SpinLock::Lock()
     bool expected = false;
     while (true)
     {
-        if (locked.compare_exchange_strong(expected, true))
+        if (locked_.compare_exchange_strong(expected, true))
         {
             break;
         }
@@ -14,6 +14,6 @@ void SpinLock::Lock()
 
 void SpinLock::Unlock()
 {
-    version++;
-    locked.store(false);
+    version_++;
+    locked_.store(false);
 }
