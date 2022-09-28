@@ -2,6 +2,9 @@
 
 #include "doubly_linked_list.hpp"
 
+// Internal Headers
+#include "memory.hpp"
+
 /**
  * @brief Transaction
  *
