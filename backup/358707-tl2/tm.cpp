@@ -37,7 +37,7 @@
  * @brief Global version clock
  *
  */
-static std::atomic_uint global_version{};
+static std::atomic_uint version_clock{};
 
 /**
  * @brief This variable stores the information about
@@ -105,7 +105,7 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
 tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool is_ro) noexcept
 {
     transaction.is_ro = is_ro;
-    transaction.rv = global_version.load();
+    transaction.rv = version_clock.load();
     return reinterpret_cast<uintptr_t>(&transaction);
 }
 
@@ -130,7 +130,7 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
         return false;
     }
 
-    transaction.wv = global_version.fetch_add(1) + 1;
+    transaction.wv = version_clock.fetch_add(1) + 1;
 
     if ((transaction.rv != transaction.wv - 1) && !reg->validate_readset(transaction))
     {

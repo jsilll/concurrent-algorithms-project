@@ -16,6 +16,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  *
+ * @section DESCRIPTION
+ *
+ * Doubly Linked List Interface
  **/
 
 #pragma once
@@ -35,7 +38,8 @@ public:
         Node *prev{};
 
         template <class... Args>
-        Node(Args &&...args) : content(std::forward<Args>(args)...)
+        Node(Args &&...args)
+            : content(std::forward<Args>(args)...)
         {
         }
 
@@ -58,6 +62,11 @@ private:
 
 public:
     ~DoublyLinkedList()
+    {
+        this->Clear();
+    }
+
+    void Clear()
     {
         while (head_ != nullptr)
         {

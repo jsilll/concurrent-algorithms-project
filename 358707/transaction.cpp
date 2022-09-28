@@ -18,40 +18,27 @@
  *
  * @section DESCRIPTION
  *
- * STM's memory layout Interface.
+ * Transaction Related Data Structures Implementation
  **/
 
-#pragma once
+#include "transaction.hpp"
 
 // External Headers
-#include <tm.hpp>
+#include <cstring>
 
-// Internal Headers
-#include "spin_lock.hpp"
-#include "doubly_linked_list.hpp"
-
-/**
- * @brief Segment of Memory
- *
- */
-struct Segment
+Transaction::WriteLog::WriteLog(const Segment *segment, const size_t size, const void *source)
+    : segment(segment), size(size)
 {
-    void *data{};
-    SpinLock versioned_write_lock;
+    value = std::malloc(size);
+    memcpy(value, source, size);
+}
 
-    Segment(size_t size, size_t align);
-    ~Segment();
-};
-
-/**
- * @brief Shared Memory Region.
- */
-struct SharedRegion
+Transaction::WriteLog::~WriteLog()
 {
-    size_t size;
-    size_t align;
-    Segment first;
-    DoublyLinkedList<Segment> allocs{};
+    std::free(value);
+}
 
-    SharedRegion(size_t size, size_t align);
-};
+Transaction::ReadLog::ReadLog(const Segment *segment)
+    : segment(segment)
+{
+}

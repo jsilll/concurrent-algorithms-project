@@ -18,7 +18,7 @@
  *
  * @section DESCRIPTION
  *
- * Implementation of the STM's memory layout.
+ * STM's memory layout Implementation.
  **/
 
 #include "memory.hpp"
@@ -31,16 +31,16 @@
 // Internal Headers
 #include "expect.hpp"
 
-Segment::Segment(size_t s, size_t a)
+Segment::Segment(size_t size, size_t align)
 {
-    data = std::aligned_alloc(a, s);
+    data = std::aligned_alloc(align, size);
 
     if (unlikely(data == nullptr))
     {
         throw std::bad_alloc();
     }
 
-    std::memset(data, 0, s);
+    std::memset(data, 0, size);
 }
 
 Segment::~Segment()
@@ -48,7 +48,7 @@ Segment::~Segment()
     std::free(data);
 }
 
-SharedRegion::SharedRegion(size_t s, size_t a)
-    : size(s), align(a), first(s, a)
+SharedRegion::SharedRegion(size_t size, size_t align)
+    : size(size), align(align), first(size, align)
 {
 }

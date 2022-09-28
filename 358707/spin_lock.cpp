@@ -16,6 +16,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  *
+ * @section DESCRIPTION
+ *
+ * Spin Lock Implementation
  **/
 
 #include "spin_lock.hpp"

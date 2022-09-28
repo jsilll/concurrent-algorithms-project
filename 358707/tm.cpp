@@ -37,7 +37,7 @@
  * @brief Global version clock, as described in TL2
  *
  */
-static std::atomic_uint global_version{};
+static std::atomic_uint version_clock{};
 
 /**
  * @brief Current transaction being run
@@ -51,14 +51,7 @@ static thread_local Transaction transaction;
  **/
 shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) noexcept
 {
-    try
-    {
-        return new SharedRegion(size, align);
-    }
-    catch (const std::exception &e)
-    {
-        return invalid_shared;
-    }
+    return new SharedRegion(size, align);
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -75,7 +68,6 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
  **/
 void *tm_start([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
     return static_cast<SharedRegion *>(shared)->first.data;
 }
 
@@ -85,7 +77,6 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_size([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
     return static_cast<SharedRegion *>(shared)->size;
 }
 
@@ -95,7 +86,6 @@ size_t tm_size([[maybe_unused]] shared_t shared) noexcept
  **/
 size_t tm_align([[maybe_unused]] shared_t shared) noexcept
 {
-    // TODO: make it thread safe
     return static_cast<SharedRegion *>(shared)->align;
 }
 
@@ -106,8 +96,10 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  **/
 tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only) noexcept
 {
-    // TODO: make it thread safe
+    transaction.read_set.Clear();
+    transaction.write_set.Clear();
     transaction.read_only = read_only;
+    transaction.read_version = version_clock.load();
     return reinterpret_cast<tx_t>(&transaction);
 }
 
@@ -132,9 +124,22 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  **/
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    // TODO: make it thread safe
-    // auto segment = reinterpret_cast<Segment*>(source);
+    auto segment = reinterpret_cast<const Segment *>(source);
+    auto node = new DoublyLinkedList<Transaction::ReadLog>::Node(segment);
+    transaction.read_set.Push(node);
+
+    // TODO:
+    // using a bloom filter, first check if the
+    // load adress already appears in the write-set, if so
+    // it returns the last value written (provides the illusion
+    // of processor consistency and avoids read-after-write-hazards).
     std::memcpy(target, source, size);
+
+    // Dunno how to do this:
+    // A load instruction sampling the associated lock is inserted before each original load,
+    // which is then followed by post-validation code checking that the location's versioned
+    // write-lock is free and has not changed.
+
     return true;
 }
 
@@ -148,8 +153,9 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  **/
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    // TODO: make it thread safe
-    std::memcpy(target, source, size);
+    auto segment = reinterpret_cast<const Segment *>(source);
+    auto node = new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source);
+    transaction.write_set.Push(node);
     return true;
 }
 

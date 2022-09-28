@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-static std::atomic_uint global_version = 0; // global version clock
+static std::atomic_uint version_clock = 0; // global version clock
 
 WordLock &getWordLock(struct SharedRegion *reg, uintptr_t addr)
 {
@@ -60,7 +60,7 @@ size_t tm_align(shared_t shared) noexcept
 
 tx_t tm_begin([[maybe_unused]] shared_t shared, bool is_ro) noexcept
 {
-    transaction.rv = global_version.load();
+    transaction.rv = version_clock.load();
     transaction.read_only = is_ro;
     return (uintptr_t)&transaction;
 }
@@ -203,7 +203,7 @@ bool tm_end(shared_t shared, [[maybe_unused]] tx_t tx) noexcept
         return false;
     }
 
-    transaction.wv = global_version.fetch_add(1) + 1;
+    transaction.wv = version_clock.fetch_add(1) + 1;
 
     if ((transaction.rv != transaction.wv - 1) && !validate_readset(reg))
     {
