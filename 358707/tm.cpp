@@ -59,7 +59,7 @@ shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) 
  **/
 void tm_destroy([[maybe_unused]] shared_t shared) noexcept
 {
-    delete static_cast<SharedRegion *>(shared); // this will call ~SharedRegion()
+    delete static_cast<SharedRegion *>(shared);
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -125,6 +125,7 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  **/
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
+    // TODO: make it thread safe
     std::memcpy(target, source, size);
     return true;
 }
@@ -139,7 +140,7 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  **/
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
+    // TODO: make it thread safe
     std::memcpy(target, source, size);
     return true;
 }
@@ -153,6 +154,7 @@ bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[mayb
  **/
 Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] size_t size, [[maybe_unused]] void **target) noexcept
 {
+    // TODO: make it thread safe
     try
     {
         auto region = static_cast<SharedRegion *>(shared);
@@ -174,20 +176,20 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
  * @return Whether the whole transaction can continue
  **/
 
-#include <iostream>
-
 bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
 {
-    // TODO: fix me ??
+    // TODO: make it thread safe
+
+    // Garanteed by C/C++ std. to work
     auto node = reinterpret_cast<SegmentNode *>(segment);
 
-    // Check to see if this is the first node the linked list
-    if (unlikely(node->prev == nullptr))
+    // Check to see if this is the first node the linked list of SharedRegion
+    if (node->prev == nullptr)
     {
         static_cast<SharedRegion *>(shared)->PopSegmentNode();
     }
 
-    delete node; // this will call ~SegmentNode
+    delete node;
 
     return true;
 }
