@@ -58,43 +58,60 @@ public:
     };
 
 private:
-    Node *head_{};
+    Node *end_{};
+    Node *begin_{};
 
 public:
     ~DoublyLinkedList()
     {
-        this->Clear();
+        Clear();
+    }
+
+    Node *begin()
+    {
+        return begin_;
+    }
+
+    Node *end()
+    {
+        return end_;
     }
 
     void Clear()
     {
-        while (head_ != nullptr)
+        while (begin_ != nullptr)
         {
-            Node *head = head_->next;
-            delete head_;
-            head_ = head;
+            Node *head = begin_->next;
+            delete begin_;
+            begin_ = head;
         }
     }
 
-    void Push(Node *node)
+    void PushBack(Node *node)
     {
-        node->next = head_;
+        node->prev = end_;
 
-        if (node->next != nullptr)
+        if (node->prev != nullptr)
         {
-            node->next->prev = node;
+            node->prev->next = node;
         }
 
-        head_ = node;
+        end_ = node;
     }
 
-    Node *Pop()
+    void PopFront()
     {
-        Node *res = head_;
-        if (head_ != nullptr)
+        if (begin_ != nullptr)
         {
-            head_ = head_->next;
+            begin_ = begin_->next;
         }
-        return res;
+    }
+
+    void PopBack()
+    {
+        if (end_ != nullptr)
+        {
+            end_ = end_->prev;
+        }
     }
 };

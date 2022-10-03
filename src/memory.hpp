@@ -40,6 +40,7 @@ struct Segment
     SpinLock versioned_write_lock;
 
     Segment(size_t size, size_t align);
+    
     ~Segment();
 };
 

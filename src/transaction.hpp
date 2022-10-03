@@ -23,10 +23,10 @@
 
 #pragma once
 
-#include "doubly_linked_list.hpp"
-
 // Internal Headers
 #include "memory.hpp"
+#include "bloom_filter.hpp"
+#include "doubly_linked_list.hpp"
 
 /**
  * @brief Transaction
@@ -47,6 +47,7 @@ struct Transaction
         void *value;
 
         WriteLog(const Segment *segment, const size_t size, const void *source);
+
         ~WriteLog();
     };
 
@@ -63,11 +64,9 @@ struct Transaction
         ReadLog(const Segment *segment);
     };
 
-    bool commited{};
     bool read_only{};
     uint32_t read_version{};
+    BloomFilter<10, 3> write_bf;
     DoublyLinkedList<ReadLog> read_set;
     DoublyLinkedList<WriteLog> write_set;
-    // TODO: ^should be kept in chronological
-    // order to avoid write-after-write hazards
 };
