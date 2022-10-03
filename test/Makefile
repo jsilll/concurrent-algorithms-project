@@ -1,4 +1,4 @@
-BIN := ../$(notdir $(lastword $(abspath .))).so
+BIN := $(notdir $(lastword $(abspath .)))
 
 EXT_H    := h
 EXT_HPP  := h hh hpp hxx h++
@@ -31,20 +31,12 @@ debug: CCFLAGS += -DDEBUG -g
 debug: build
 
 build: $(BIN)
+
 clean:
 	$(RM) $(OBJS) $(BIN)
 
-define BUILD_C
-%.$(1).o: %.$(1) $$(HDRS_C) Makefile
-	$$(CC) $$(CCFLAGS) -c -o $$@ $$<
-endef
-$(foreach EXT,$(EXT_C),$(eval $(call BUILD_C,$(EXT))))
+%.cpp.o: %.cpp $(HDRS_CXX)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-define BUILD_CXX
-%.$(1).o: %.$(1) $$(HDRS_CXX) Makefile
-	$$(CXX) $$(CXXFLAGS) -c -o $$@ $$<
-endef
-$(foreach EXT,$(EXT_CXX),$(eval $(call BUILD_CXX,$(EXT))))
-
-$(BIN): $(OBJS) Makefile
-	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
+$(BIN): $(OBJS)
+	$(CXX) -o $@ $(OBJS) ../src.so $(LDLIBS)

@@ -29,6 +29,10 @@ LIB_SOS  := $(patsubst %/,%.so,$(filter-out ../reference/,$(LIB_DIRS)))
 
 .PHONY: build build-libs clean clean-libs run
 
+debug: CXXFLAGS += -DDEBUG -g
+debug: CCFLAGS += -DDEBUG -g
+debug: build
+
 build: $(BIN)
 build-libs:
 	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) build; )

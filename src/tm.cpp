@@ -24,6 +24,9 @@
 #include <tm.hpp>
 
 // External Headers
+#ifdef DEBUG
+#include <iostream>
+#endif
 #include <atomic>
 #include <cstring>
 #include <exception>
@@ -135,12 +138,22 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
     // of processor consistency and avoids read-after-write-hazards).
     if (transaction.write_bf.Lookup(segment, sizeof(Segment *)))
     {
+#ifdef DEBUG
+        std::cout << "[DEBUG] Found a write before read in WriteLog.\n";
+        std::cout << "[DEBUG] Searching for segment: " << segment << "\n";
+#endif
         auto node = transaction.write_set.begin();
         while (node != nullptr)
         {
             Transaction::WriteLog log = node->content;
+#ifdef DEBUG
+            std::cout << "[DEBUG] log.segment = " << log.segment << "\n";
+#endif
             if (log.segment == segment)
             {
+#ifdef DEBUG
+                std::cout << "[DEBUG] Found the dirty segment in WriteLog!\n";
+#endif
                 std::memcpy(target, log.value, size);
                 return true;
             }
@@ -166,7 +179,7 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  **/
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    auto segment = reinterpret_cast<const Segment *>(source);
+    auto segment = reinterpret_cast<const Segment *>(target);
     transaction.write_bf.Insert(segment, sizeof(Segment *));
     transaction.write_set.PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
     return true;

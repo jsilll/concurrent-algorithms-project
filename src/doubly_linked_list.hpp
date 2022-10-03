@@ -24,6 +24,9 @@
 #pragma once
 
 // External Headers
+#ifdef DEBUG
+#include <iostream>
+#endif
 #include <cstdlib>
 #include <utility>
 
@@ -81,9 +84,12 @@ public:
     {
         while (begin_ != nullptr)
         {
-            Node *head = begin_->next;
+#ifdef DEBUG
+            std::cout << "[DEBUG] Deleting: " << begin_ << "\n";
+#endif
+            Node *new_head = begin_->next;
             delete begin_;
-            begin_ = head;
+            begin_ = new_head;
         }
     }
 
@@ -97,6 +103,11 @@ public:
         }
 
         end_ = node;
+
+        if (begin_ == nullptr)
+        {
+            begin_ = node;
+        }
     }
 
     void PopFront()
