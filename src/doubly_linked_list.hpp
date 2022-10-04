@@ -85,7 +85,7 @@ public:
         while (begin_ != nullptr)
         {
 #ifdef DEBUG
-            std::cout << "[DEBUG] Deleting: " << begin_ << "\n";
+            std::cout << "[DEBUG] Deleting: " << begin_ << std::endl;
 #endif
             Node *new_head = begin_->next;
             delete begin_;

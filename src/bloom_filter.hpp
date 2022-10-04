@@ -33,8 +33,8 @@
 /**
  * @brief Bloom Filter
  *
- * @tparam M - size of the array
- * @tparam K - number of hashes
+ * @tparam M Size of the array
+ * @tparam K Number of hashes
  */
 template <int M, int K>
 class BloomFilter

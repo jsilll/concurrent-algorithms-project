@@ -139,22 +139,21 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
     if (transaction.write_bf.Lookup(segment, sizeof(Segment *)))
     {
 #ifdef DEBUG
-        std::cout << "[DEBUG] Found a write before read in WriteLog.\n";
-        std::cout << "[DEBUG] Searching for segment: " << segment << "\n";
+        std::cout << "[DEBUG] Found a write before read in WriteLog." << std::endl;
+        std::cout << "[DEBUG] Searching for segment: " << segment << std::endl;
 #endif
         auto node = transaction.write_set.begin();
         while (node != nullptr)
         {
-            Transaction::WriteLog log = node->content;
 #ifdef DEBUG
-            std::cout << "[DEBUG] log.segment = " << log.segment << "\n";
+            std::cout << "[DEBUG] log.segment = " << node->content.segment << std::endl;
 #endif
-            if (log.segment == segment)
+            if (node->content.segment == segment)
             {
 #ifdef DEBUG
-                std::cout << "[DEBUG] Found the dirty segment in WriteLog!\n";
+                std::cout << "[DEBUG] Found the dirty segment in WriteLog!" << std::endl;
 #endif
-                std::memcpy(target, log.value, size);
+                std::memcpy(target, node->content.value, size);
                 return true;
             }
             node = node->next;

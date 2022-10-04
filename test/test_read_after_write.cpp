@@ -24,11 +24,13 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[])
     tm_read(region, tx, start, 4, &res);
     assertm(res == 1, "Read After Write is Successful");
 
-    // tm_alloc
-    // tm_free
+    void* allocd_seg;
+    tm_alloc(region, tx, 4, &allocd_seg);
+    tm_write(region, tx, &src, sizeof(src), allocd_seg);
+    tm_read(region, tx, allocd_seg, 4, &res);
+    assertm(res == 1, "Read After Write is Successful");
 
     // Ending the transaction
     tm_end(region, tx);
-
     tm_destroy(region);
 }

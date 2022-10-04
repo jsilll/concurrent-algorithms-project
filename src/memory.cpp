@@ -33,7 +33,7 @@
 
 Segment::Segment(size_t size, size_t align)
 {
-    data = std::aligned_alloc(align, size);
+    data = aligned_alloc(align, size);
 
     if (unlikely(data == nullptr))
     {

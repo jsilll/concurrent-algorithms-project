@@ -25,4 +25,3 @@ This repository provides:
 * a tool to submit your implementation (in `submit.py`)
   * you should have received by mail a secret _unique user identifier_ (UUID)
   * see the [description](https://dcl.epfl.ch/site/_media/education/ca-project.pdf) for more information
-# concurrent-algorithms-project
