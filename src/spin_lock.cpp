@@ -21,22 +21,41 @@
  * Spin Lock Implementation
  **/
 
+#include <thread>
+
 #include "spin_lock.hpp"
 
-void SpinLock::Lock()
+bool SpinLock::Lock()
 {
+    int i{};
     bool expected = false;
-    while (true)
+    while (i < 10)
     {
         if (locked_.compare_exchange_strong(expected, true))
         {
-            break;
+            return true;
         }
+
+        i++;
+        std::this_thread::sleep_for (std::chrono::milliseconds(100));
     }
+
+    return false;
+}
+
+bool SpinLock::IsLocked()
+{
+    version_++;
+    return locked_.load();
 }
 
 void SpinLock::Unlock()
 {
     version_++;
     locked_.store(false);
+}
+
+unsigned int SpinLock::Version() 
+{
+    return version_.load();
 }

@@ -23,15 +23,10 @@
 
 #include <tm.hpp>
 
-// External Headers
-#ifdef DEBUG
-#include <iostream>
-#endif
 #include <atomic>
 #include <cstring>
 #include <exception>
 
-// Internal Headers
 #include "expect.hpp"
 #include "memory.hpp"
 #include "transaction.hpp"
@@ -40,7 +35,7 @@
  * @brief Global version clock, as described in TL2
  *
  */
-static std::atomic_uint version_clock{};
+static std::atomic_uint gv{0};
 
 /**
  * @brief Current transaction being run
@@ -97,13 +92,13 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
  **/
-tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only) noexcept
+tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool ro) noexcept
 {
-    transaction.read_set.Clear();
-    transaction.write_set.Clear();
-    transaction.write_bf.Clear();
-    transaction.read_only = read_only;
-    transaction.read_version = version_clock.load();
+    transaction.ro(ro);
+    transaction.rv(gv.load());
+    transaction.rs().Clear();
+    transaction.ws().Clear();
+    transaction.wb().Clear();
     return reinterpret_cast<tx_t>(&transaction);
 }
 
@@ -114,8 +109,41 @@ tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool read_only)
  **/
 bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
 {
-    // TODO: make it thread safe
-    // TODO: try to commit transaction
+    // Lock the write-set in any convenient order using
+    // bounded-spinning to avoid indefinite dealock.
+    if (!transaction.LockWriteSet())
+    {
+        return false;
+    }
+
+    // Upon successful completion of lock acquisition of all
+    // locks in the write-set perform an increment and fetch
+    auto wv = gv.fetch_add(1) + 1;
+
+    // In the special case where rv + 1 it is not necessary to
+    // validate the read-set, as it is guaranteed that no
+    // concurrently executing transaction could have modified it.
+    if ((transaction.rv() + 1) == wv)
+    {
+        // For each location in the write-set, store to the location
+        // the new value from the write-set and release the locations lock
+        // by setting the version value to the write-version wv clearing
+        // the
+        transaction.UnlockWriteSet();
+        return true;
+    }
+
+    // Validate for each location in the read-set that the version
+    // number associated with the versioned-write-lock is <= rv.
+    // We also verify that these memory locations have not been locked by other threads.
+    if (!transaction.ValidateReadSet())
+    {
+        transaction.UnlockWriteSet();
+        return false;
+    }
+
+    transaction.Commit();
+    transaction.UnlockWriteSet();
     return true;
 }
 
@@ -129,41 +157,37 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  **/
 bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
-    auto segment = reinterpret_cast<const Segment *>(source);
-    transaction.read_set.PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
+    auto segment = const_cast<Segment *>(reinterpret_cast<const Segment *>(source));
 
     // Using a bloom filter, first check if the
     // load adress already appears in the write-set, if so
     // it returns the last value written (provides the illusion
     // of processor consistency and avoids read-after-write-hazards).
-    if (transaction.write_bf.Lookup(segment, sizeof(Segment *)))
+    if (transaction.wb().Lookup(segment, sizeof(Segment *)))
     {
-#ifdef DEBUG
-        std::cout << "[DEBUG] Found a write before read in WriteLog." << std::endl;
-        std::cout << "[DEBUG] Searching for segment: " << segment << std::endl;
-#endif
-        auto node = transaction.write_set.begin();
+        auto node = transaction.ws().end();
         while (node != nullptr)
         {
-#ifdef DEBUG
-            std::cout << "[DEBUG] log.segment = " << node->content.segment << std::endl;
-#endif
             if (node->content.segment == segment)
             {
-#ifdef DEBUG
-                std::cout << "[DEBUG] Found the dirty segment in WriteLog!" << std::endl;
-#endif
+                transaction.rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
                 std::memcpy(target, node->content.value, size);
                 return true;
             }
-            node = node->next;
+
+            node = node->prev;
         }
     }
 
-    // TODO: Don't understand
     // A load instruction sampling the associated lock is inserted before each original load,
     // which is then followed by post-validation code checking that the location's versioned
     // write-lock is free and has not changed.
+    transaction.rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
+    if (segment->versioned_write_lock.IsLocked() or transaction.rv() < segment->versioned_write_lock.Version())
+    {
+        return false;
+    }
+
     std::memcpy(target, source, size);
     return true;
 }
@@ -179,8 +203,8 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
 bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
 {
     auto segment = reinterpret_cast<const Segment *>(target);
-    transaction.write_bf.Insert(segment, sizeof(Segment *));
-    transaction.write_set.PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
+    transaction.wb().Insert(segment, sizeof(Segment *));
+    transaction.ws().PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
     return true;
 }
 
@@ -216,12 +240,8 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
 
 bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
 {
-    // TODO: make it thread safe
-
-    // Garanteed by C/C++ std. to work
     auto node = reinterpret_cast<DoublyLinkedList<Segment>::Node *>(segment);
 
-    // Check to see if this is the first node the linked list of SharedRegion
     if (node->prev == nullptr)
     {
         static_cast<SharedRegion *>(shared)->allocs.PopFront();

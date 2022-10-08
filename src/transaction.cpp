@@ -27,7 +27,7 @@
 #include <cstring>
 
 Transaction::WriteLog::WriteLog(const Segment *segment, const size_t size, const void *source)
-    : segment(segment), size(size)
+    : segment(const_cast<Segment *>(segment)), size(size)
 {
     value = std::malloc(size);
     memcpy(value, source, size);
@@ -39,6 +39,73 @@ Transaction::WriteLog::~WriteLog()
 }
 
 Transaction::ReadLog::ReadLog(const Segment *segment)
-    : segment(segment)
+    : segment(const_cast<Segment *>(segment))
 {
+}
+
+bool Transaction::ValidateReadSet()
+{
+    auto rs_node = rs_.begin();
+    while (rs_node != nullptr)
+    {
+        auto segment = rs_node->content.segment;
+        // In case the validation fails, the transaction is aborted.
+        if (segment->versioned_write_lock.IsLocked() or rv_ < segment->versioned_write_lock.Version())
+        {
+            return false;
+        }
+
+        rs_node = rs_node->next;
+    }
+
+    return true;
+}
+
+void Transaction::Commit() 
+{
+    auto ws_node = ws_.begin();
+    while (ws_node != nullptr) 
+    {
+        auto src = ws_node->content.value;
+        auto size = ws_node->content.size;
+        auto dest = ws_node->content.segment->data;
+        memcpy(dest, src, size);
+    }
+}
+
+
+bool Transaction::LockWriteSet()
+{
+    auto ws_node = ws_.begin();
+    while (ws_node != nullptr)
+    {
+        // In case not all of these locks are
+        // successfully acquired, the transaction fails
+        if (!ws_node->content.segment->versioned_write_lock.Lock())
+        {
+            // Unlock all the previously acquired locks
+            ws_node = ws_node->prev;
+            while (ws_node != nullptr)
+            {
+                ws_node->content.segment->versioned_write_lock.Unlock();
+                ws_node = ws_node->prev;
+            }
+
+            return false;
+        }
+
+        ws_node = ws_node->prev;
+    }
+
+    return true;
+}
+
+void Transaction::UnlockWriteSet()
+{
+    auto ws_node = ws_.begin();
+    while (ws_node != nullptr)
+    {
+        ws_node->content.segment->versioned_write_lock.Unlock();
+        ws_node = ws_node->next;
+    }
 }

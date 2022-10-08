@@ -32,8 +32,9 @@
  * @brief Transaction
  *
  */
-struct Transaction
+class Transaction
 {
+public:
     /**
      * @brief Maintains the information
      * associated with a write within a
@@ -42,7 +43,7 @@ struct Transaction
      */
     struct WriteLog
     {
-        const Segment *segment;
+        Segment *segment;
         const size_t size;
         void *value;
 
@@ -59,14 +60,31 @@ struct Transaction
      */
     struct ReadLog
     {
-        const Segment *segment;
+        Segment *segment;
 
         ReadLog(const Segment *segment);
     };
 
-    bool read_only{};
-    uint32_t read_version{};
-    BloomFilter<10, 3> write_bf;
-    DoublyLinkedList<ReadLog> read_set;
-    DoublyLinkedList<WriteLog> write_set;
+private:
+    bool ro_{false};                // read only
+    uint32_t rv_{0};                // read version
+    BloomFilter<10, 3> wb_;         // write bloom
+    DoublyLinkedList<ReadLog> rs_;  // read set
+    DoublyLinkedList<WriteLog> ws_; // write set
+
+public:
+    inline bool ro() { return ro_; }
+    inline void ro(bool ro) { ro_ = ro; }
+
+    inline uint32_t rv() { return rv_; }
+    inline void rv(uint32_t rv) { rv_ = rv; }
+
+    BloomFilter<10, 3> &wb() { return wb_; }
+    DoublyLinkedList<ReadLog> &rs() { return rs_; }
+    DoublyLinkedList<WriteLog> &ws() { return ws_; }
+
+    void Commit();
+    bool LockWriteSet();
+    void UnlockWriteSet();
+    bool ValidateReadSet();
 };

@@ -23,10 +23,6 @@
 
 #pragma once
 
-// External Headers
-#ifdef DEBUG
-#include <iostream>
-#endif
 #include <cstdlib>
 #include <utility>
 
@@ -37,8 +33,8 @@ public:
     struct Node
     {
         T content;
-        Node *next{};
-        Node *prev{};
+        Node *next{nullptr};
+        Node *prev{nullptr};
 
         template <class... Args>
         Node(Args &&...args)
@@ -61,8 +57,8 @@ public:
     };
 
 private:
-    Node *end_{};
-    Node *begin_{};
+    Node *end_{nullptr};
+    Node *begin_{nullptr};
 
 public:
     ~DoublyLinkedList()
@@ -84,9 +80,6 @@ public:
     {
         while (begin_ != nullptr)
         {
-#ifdef DEBUG
-            std::cout << "[DEBUG] Deleting: " << begin_ << std::endl;
-#endif
             Node *new_head = begin_->next;
             delete begin_;
             begin_ = new_head;
