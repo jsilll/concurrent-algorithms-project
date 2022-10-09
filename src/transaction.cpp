@@ -58,17 +58,17 @@ Transaction::Transaction(bool ro, uint32_t rv, shared_t region)
 
 bool Transaction::ValidateReadSet()
 {
-    auto rs_node = rs_.begin();
-    while (rs_node != nullptr)
+    auto node = rs_.begin();
+    while (node != nullptr)
     {
-        auto segment = rs_node->content.segment;
+        auto segment = node->content.segment;
         // In case the validation fails, the transaction is aborted.
         if (segment->versioned_write_lock.IsLocked() or rv_ < segment->versioned_write_lock.Version())
         {
             return false;
         }
 
-        rs_node = rs_node->next;
+        node = node->next;
     }
 
     return true;
@@ -76,35 +76,35 @@ bool Transaction::ValidateReadSet()
 
 void Transaction::Commit()
 {
-    auto ws_node = ws_.begin();
-    while (ws_node != nullptr)
+    auto node = ws_.begin();
+    while (node != nullptr)
     {
-        memcpy(ws_node->content.segment->data, ws_node->content.value, ws_node->content.size);
-        ws_node = ws_node->next;
+        memcpy(node->content.segment->data, node->content.value, node->content.size);
+        node = node->next;
     }
 }
 
 bool Transaction::LockWriteSet()
 {
-    auto ws_node = ws_.begin();
-    while (ws_node != nullptr)
+    auto node = ws_.begin();
+    while (node != nullptr)
     {
         // In case not all of these locks are
         // successfully acquired, the transaction fails
-        if (!ws_node->content.segment->versioned_write_lock.Lock())
+        if (!node->content.segment->versioned_write_lock.Lock())
         {
             // Unlock all the previously acquired locks
-            ws_node = ws_node->prev;
-            while (ws_node != nullptr)
+            node = node->prev;
+            while (node != nullptr)
             {
-                ws_node->content.segment->versioned_write_lock.Unlock();
-                ws_node = ws_node->prev;
+                node->content.segment->versioned_write_lock.Unlock();
+                node = node->prev;
             }
 
             return false;
         }
 
-        ws_node = ws_node->prev;
+        node = node->prev;
     }
 
     return true;
@@ -112,10 +112,10 @@ bool Transaction::LockWriteSet()
 
 void Transaction::UnlockWriteSet(unsigned int wv)
 {
-    auto ws_node = ws_.begin();
-    while (ws_node != nullptr)
+    auto node = ws_.begin();
+    while (node != nullptr)
     {
-        ws_node->content.segment->versioned_write_lock.Unlock(wv);
-        ws_node = ws_node->next;
+        node->content.segment->versioned_write_lock.Unlock(wv);
+        node = node->next;
     }
 }

@@ -48,7 +48,7 @@ public:
         void *value;
 
         WriteLog(const Segment *segment, const size_t size, const size_t align, const void *source);
-
+        
         ~WriteLog();
     };
 

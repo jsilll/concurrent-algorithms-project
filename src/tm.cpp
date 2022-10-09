@@ -127,10 +127,7 @@ bool tm_end([[maybe_unused]] shared_t shared, tx_t tx) noexcept
         // concurrently executing transaction could have modified it.
         if ((transaction->rv() + 1) == wv)
         {
-            // For each location in the write-set, store to the location
-            // the new value from the write-set and release the locations lock
-            // by setting the version value to the write-version wv clearing
-            // the
+            transaction->Commit();
             transaction->UnlockWriteSet(wv);
             delete transaction;
             return true;
