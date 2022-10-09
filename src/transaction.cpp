@@ -24,13 +24,21 @@
 #include "transaction.hpp"
 
 // External Headers
+#include <new>
 #include <cstring>
 
-Transaction::WriteLog::WriteLog(const Segment *segment, const size_t size, const void *source)
+// Internal Headers
+#include "expect.hpp"
+
+Transaction::WriteLog::WriteLog(const Segment *segment, const size_t size, const size_t align, const void *source)
     : segment(const_cast<Segment *>(segment)), size(size)
 {
-    value = std::malloc(size);
-    memcpy(value, source, size);
+    if (unlikely(posix_memalign(&value, align, size) != 0))
+    {
+        throw std::bad_alloc();
+    }
+
+    std::memcpy(value, source, size);
 }
 
 Transaction::WriteLog::~WriteLog()
@@ -72,7 +80,6 @@ void Transaction::Commit()
     while (ws_node != nullptr)
     {
         memcpy(ws_node->content.segment->data, ws_node->content.value, ws_node->content.size);
-
         ws_node = ws_node->next;
     }
 }

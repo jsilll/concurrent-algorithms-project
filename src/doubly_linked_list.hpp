@@ -42,19 +42,6 @@ public:
             : content(std::forward<Args>(args)...)
         {
         }
-
-        ~Node()
-        {
-            if (prev != nullptr)
-            {
-                prev->next = next;
-            }
-
-            if (next != nullptr)
-            {
-                next->prev = prev;
-            }
-        }
     };
 
 private:
@@ -81,9 +68,9 @@ public:
     {
         while (begin_ != nullptr)
         {
-            Node *new_head = begin_->next;
+            Node *head_new = begin_->next;
             delete begin_;
-            begin_ = new_head;
+            begin_ = head_new;
         }
     }
 
@@ -106,17 +93,11 @@ public:
 
     void PopFront()
     {
-        if (begin_ != nullptr)
-        {
-            begin_ = begin_->next;
-        }
+        begin_ = begin_->next;
     }
 
     void PopBack()
     {
-        if (end_ != nullptr)
-        {
-            end_ = end_->prev;
-        }
+        end_ = end_->prev;
     }
 };

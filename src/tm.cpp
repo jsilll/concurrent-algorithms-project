@@ -224,10 +224,20 @@ bool tm_read([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size
  **/
 bool tm_write([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
+    auto region = reinterpret_cast<SharedRegion *>(shared);
     auto transaction = reinterpret_cast<Transaction *>(tx);
     auto segment = reinterpret_cast<const Segment *>(target);
     transaction->wbf().Insert(segment, sizeof(Segment *));
-    transaction->ws().PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
+
+    try
+    {
+        transaction->ws().PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, region->align, source));
+    }
+    catch (const std::exception &e)
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -269,9 +279,18 @@ bool tm_free(shared_t shared, [[maybe_unused]] tx_t tx, void *segment) noexcept
     {
         static_cast<SharedRegion *>(shared)->allocs.PopFront();
     }
-    else if (node->next == nullptr)
+    else
+    {
+        node->prev->next = node->next;
+    }
+
+    if (node->next == nullptr)
     {
         static_cast<SharedRegion *>(shared)->allocs.PopBack();
+    }
+    else
+    {
+        node->next->prev = node->prev;
     }
 
     delete node;
