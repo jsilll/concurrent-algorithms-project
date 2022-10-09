@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   doubly_linked_list.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -18,11 +18,12 @@
  *
  * @section DESCRIPTION
  *
- * Doubly Linked List Interface
+ * Doubly Linked List Implementation
  **/
 
 #pragma once
 
+// External Headers
 #include <cstdlib>
 #include <utility>
 

@@ -1,12 +1,12 @@
-
-//-----------------------------------------------------------------------------
-// MurmurHash3 was written by Austin Appleby, and is placed in the public
-// domain. The author hereby disclaims copyright to this source code.
-
-// Note - The x86 and x64 versions do _not_ produce the same results, as the
-// algorithms are optimized for their respective platforms. You can still
-// compile and run any of them on any platform, but your performance with the
-// non-native version will be less than optimal.
+/**
+ * @file   murmur_hash3.cpp
+ * @author João Silveira <joao.freixialsilveira@epfl.ch>
+ *
+ * @section DESCRIPTION
+ *
+ * Murmur Hash 3 Implementation
+ * https://github.com/aappleby/smhasher
+ **/
 
 #include "murmur_hash3.hpp"
 
@@ -21,17 +21,10 @@ inline uint64_t rotl64(uint64_t x, int8_t r)
 
 #define BIG_CONSTANT(x) (x##LLU)
 
-//-----------------------------------------------------------------------------
-// Block read - if your platform needs to do endian-swapping or can only
-// handle aligned reads, do the conversion here
-
 FORCE_INLINE uint64_t getblock64(const uint64_t *p, int i)
 {
     return p[i];
 }
-
-//-----------------------------------------------------------------------------
-// Finalization mix - force all bits of a hash block to avalanche
 
 FORCE_INLINE uint64_t fmix64(uint64_t k)
 {
@@ -44,8 +37,6 @@ FORCE_INLINE uint64_t fmix64(uint64_t k)
     return k;
 }
 
-//-----------------------------------------------------------------------------
-
 void MurmurHash3_x64_128(const void *key, const int len, const uint32_t seed, void *out)
 {
     const uint8_t *data = (const uint8_t *)key;
@@ -56,9 +47,6 @@ void MurmurHash3_x64_128(const void *key, const int len, const uint32_t seed, vo
 
     const uint64_t c1 = BIG_CONSTANT(0x87c37b91114253d5);
     const uint64_t c2 = BIG_CONSTANT(0x4cf5ad432745937f);
-
-    //----------
-    // body
 
     const uint64_t *blocks = (const uint64_t *)(data);
 
@@ -85,9 +73,6 @@ void MurmurHash3_x64_128(const void *key, const int len, const uint32_t seed, vo
         h2 += h1;
         h2 = h2 * 5 + 0x38495ab5;
     }
-
-    //----------
-    // tail
 
     const uint8_t *tail = (const uint8_t *)(data + nblocks * 16);
 
@@ -169,5 +154,3 @@ void MurmurHash3_x64_128(const void *key, const int len, const uint32_t seed, vo
     ((uint64_t *)out)[0] = h1;
     ((uint64_t *)out)[1] = h2;
 }
-
-//-----------------------------------------------------------------------------

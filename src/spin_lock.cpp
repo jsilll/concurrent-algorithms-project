@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   spin_lock.cpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -21,13 +21,14 @@
  * Spin Lock Implementation
  **/
 
-#include <thread>
-
 #include "spin_lock.hpp"
+
+// External Headers
+#include <thread>
 
 bool SpinLock::Lock()
 {
-    int i{};
+    int i{0};
     bool expected = false;
     while (i < 10)
     {
@@ -45,13 +46,17 @@ bool SpinLock::Lock()
 
 bool SpinLock::IsLocked()
 {
-    version_++;
     return locked_.load();
 }
 
 void SpinLock::Unlock()
 {
-    version_++;
+    locked_.store(false);
+}
+
+void SpinLock::Unlock(unsigned int wv)
+{
+    version_.store(wv);
     locked_.store(false);
 }
 

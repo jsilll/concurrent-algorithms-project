@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   expect.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -18,7 +18,7 @@
  *
  * @section DESCRIPTION
  *
- * Wrapper for compiler intrinsics.
+ * Wrapper for __builtin_expect compiler intrinsics.
  **/
 
 #pragma once

@@ -23,10 +23,12 @@
 
 #include <tm.hpp>
 
+// External Headers
 #include <atomic>
 #include <cstring>
 #include <exception>
 
+// Internal Headers
 #include "expect.hpp"
 #include "memory.hpp"
 #include "transaction.hpp"
@@ -40,14 +42,14 @@ static std::atomic_uint gv{0};
 /**
  * @brief Current transaction being run
  */
-static thread_local Transaction transaction;
+// static thread_local Transaction transaction;
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
  **/
-shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) noexcept
+shared_t tm_create(size_t size, size_t align) noexcept
 {
     return static_cast<void *>(new SharedRegion(size, align));
 }
@@ -55,7 +57,7 @@ shared_t tm_create([[maybe_unused]] size_t size, [[maybe_unused]] size_t align) 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
  * @param shared Shared memory region to destroy, with no running transaction
  **/
-void tm_destroy([[maybe_unused]] shared_t shared) noexcept
+void tm_destroy(shared_t shared) noexcept
 {
     delete static_cast<SharedRegion *>(shared);
 }
@@ -64,7 +66,7 @@ void tm_destroy([[maybe_unused]] shared_t shared) noexcept
  * @param shared Shared memory region to query
  * @return Start address of the first allocated segment
  **/
-void *tm_start([[maybe_unused]] shared_t shared) noexcept
+void *tm_start(shared_t shared) noexcept
 {
     return static_cast<void *>(static_cast<SharedRegion *>(shared)->first.data);
 }
@@ -73,7 +75,7 @@ void *tm_start([[maybe_unused]] shared_t shared) noexcept
  * @param shared Shared memory region to query
  * @return First allocated segment size
  **/
-size_t tm_size([[maybe_unused]] shared_t shared) noexcept
+size_t tm_size(shared_t shared) noexcept
 {
     return static_cast<SharedRegion *>(shared)->size;
 }
@@ -82,7 +84,7 @@ size_t tm_size([[maybe_unused]] shared_t shared) noexcept
  * @param shared Shared memory region to query
  * @return Alignment used globally
  **/
-size_t tm_align([[maybe_unused]] shared_t shared) noexcept
+size_t tm_align(shared_t shared) noexcept
 {
     return static_cast<SharedRegion *>(shared)->align;
 }
@@ -92,14 +94,9 @@ size_t tm_align([[maybe_unused]] shared_t shared) noexcept
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
  **/
-tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool ro) noexcept
+tx_t tm_begin(shared_t shared, bool ro) noexcept
 {
-    transaction.ro(ro);
-    transaction.rv(gv.load());
-    transaction.rs().Clear();
-    transaction.ws().Clear();
-    transaction.wb().Clear();
-    return reinterpret_cast<tx_t>(&transaction);
+    return reinterpret_cast<tx_t>(new Transaction(ro, gv.load(), shared));
 }
 
 /** [thread-safe] End the given transaction.
@@ -107,43 +104,53 @@ tx_t tm_begin([[maybe_unused]] shared_t shared, [[maybe_unused]] bool ro) noexce
  * @param tx     Transaction to end
  * @return Whether the whole transaction committed
  **/
-bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
+bool tm_end([[maybe_unused]] shared_t shared, tx_t tx) noexcept
 {
-    // Lock the write-set in any convenient order using
-    // bounded-spinning to avoid indefinite dealock.
-    if (!transaction.LockWriteSet())
+    auto transaction = reinterpret_cast<Transaction *>(tx);
+
+    if (!transaction->ro())
     {
-        return false;
+        // Lock the write-set in any convenient order using
+        // bounded-spinning to avoid indefinite dealock.
+        if (!transaction->LockWriteSet())
+        {
+            delete transaction;
+            return false;
+        }
+
+        // Upon successful completion of lock acquisition of all
+        // locks in the write-set perform an increment and fetch
+        auto wv = gv.fetch_add(1) + 1;
+
+        // In the special case where rv + 1 it is not necessary to
+        // validate the read-set, as it is guaranteed that no
+        // concurrently executing transaction could have modified it.
+        if ((transaction->rv() + 1) == wv)
+        {
+            // For each location in the write-set, store to the location
+            // the new value from the write-set and release the locations lock
+            // by setting the version value to the write-version wv clearing
+            // the
+            transaction->UnlockWriteSet(wv);
+            delete transaction;
+            return true;
+        }
+
+        // Validate for each location in the read-set that the version
+        // number associated with the versioned-write-lock is <= rv.
+        // We also verify that these memory locations have not been locked by other threads.
+        if (!transaction->ValidateReadSet())
+        {
+            transaction->UnlockWriteSet(wv);
+            delete transaction;
+            return false;
+        }
+
+        transaction->Commit();
+        transaction->UnlockWriteSet(wv);
     }
 
-    // Upon successful completion of lock acquisition of all
-    // locks in the write-set perform an increment and fetch
-    auto wv = gv.fetch_add(1) + 1;
-
-    // In the special case where rv + 1 it is not necessary to
-    // validate the read-set, as it is guaranteed that no
-    // concurrently executing transaction could have modified it.
-    if ((transaction.rv() + 1) == wv)
-    {
-        // For each location in the write-set, store to the location
-        // the new value from the write-set and release the locations lock
-        // by setting the version value to the write-version wv clearing
-        // the
-        transaction.UnlockWriteSet();
-        return true;
-    }
-
-    // Validate for each location in the read-set that the version
-    // number associated with the versioned-write-lock is <= rv.
-    // We also verify that these memory locations have not been locked by other threads.
-    if (!transaction.ValidateReadSet())
-    {
-        transaction.UnlockWriteSet();
-        return false;
-    }
-
-    transaction.Commit();
-    transaction.UnlockWriteSet();
+    delete transaction;
     return true;
 }
 
@@ -155,40 +162,55 @@ bool tm_end([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx) noexcept
  * @param target Target start address (in a private region)
  * @return Whether the whole transaction can continue
  **/
-bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
+bool tm_read([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
+    auto transaction = reinterpret_cast<Transaction *>(tx);
     auto segment = const_cast<Segment *>(reinterpret_cast<const Segment *>(source));
 
-    // Using a bloom filter, first check if the
-    // load adress already appears in the write-set, if so
-    // it returns the last value written (provides the illusion
-    // of processor consistency and avoids read-after-write-hazards).
-    if (transaction.wb().Lookup(segment, sizeof(Segment *)))
+    if (!transaction->ro())
     {
-        auto node = transaction.ws().end();
-        while (node != nullptr)
+        // Using a bloom filter, first check if the
+        // load adress already appears in the write-set, if so
+        // it returns the last value written (provides the illusion
+        // of processor consistency and avoids read-after-write-hazards).
+        if (transaction->wbf().Lookup(segment, sizeof(Segment *)))
         {
-            if (node->content.segment == segment)
+            auto node = transaction->ws().end();
+            while (node != nullptr)
             {
-                transaction.rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
-                std::memcpy(target, node->content.value, size);
-                return true;
-            }
+                if (node->content.segment == segment)
+                {
+                    // A load instruction sampling the associated lock is inserted before each original load,
+                    // which is then followed by post-validation code checking that the location's versioned
+                    // write-lock is free and has not changed.
+                    if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
+                    {
+                        return false;
+                    }
 
-            node = node->prev;
+                    transaction->rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
+
+                    std::memcpy(target, node->content.value, size);
+
+                    return true;
+                }
+                node = node->prev;
+            }
         }
+
+        transaction->rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
     }
 
     // A load instruction sampling the associated lock is inserted before each original load,
     // which is then followed by post-validation code checking that the location's versioned
     // write-lock is free and has not changed.
-    transaction.rs().PushBack(new DoublyLinkedList<Transaction::ReadLog>::Node(segment));
-    if (segment->versioned_write_lock.IsLocked() or transaction.rv() < segment->versioned_write_lock.Version())
+    if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
     {
         return false;
     }
 
     std::memcpy(target, source, size);
+
     return true;
 }
 
@@ -200,11 +222,12 @@ bool tm_read([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe
  * @param target Target start address (in the shared region)
  * @return Whether the whole transaction can continue
  **/
-bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void const *source, [[maybe_unused]] size_t size, [[maybe_unused]] void *target) noexcept
+bool tm_write([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
+    auto transaction = reinterpret_cast<Transaction *>(tx);
     auto segment = reinterpret_cast<const Segment *>(target);
-    transaction.wb().Insert(segment, sizeof(Segment *));
-    transaction.ws().PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
+    transaction->wbf().Insert(segment, sizeof(Segment *));
+    transaction->ws().PushBack(new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source));
     return true;
 }
 
@@ -215,7 +238,7 @@ bool tm_write([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[mayb
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
  **/
-Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] size_t size, [[maybe_unused]] void **target) noexcept
+Alloc tm_alloc(shared_t shared, [[maybe_unused]] tx_t tx, size_t size, void **target) noexcept
 {
     try
     {
@@ -238,7 +261,7 @@ Alloc tm_alloc([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[may
  * @return Whether the whole transaction can continue
  **/
 
-bool tm_free([[maybe_unused]] shared_t shared, [[maybe_unused]] tx_t tx, [[maybe_unused]] void *segment) noexcept
+bool tm_free(shared_t shared, [[maybe_unused]] tx_t tx, void *segment) noexcept
 {
     auto node = reinterpret_cast<DoublyLinkedList<Segment>::Node *>(segment);
 

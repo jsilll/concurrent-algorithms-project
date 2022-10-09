@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   memory.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -36,7 +36,7 @@
  */
 struct Segment
 {
-    void *data{};
+    void *data{nullptr};
     SpinLock versioned_write_lock;
 
     Segment(size_t size, size_t align);

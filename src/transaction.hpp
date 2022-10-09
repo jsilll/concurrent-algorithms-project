@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   transaction.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -18,7 +18,7 @@
  *
  * @section DESCRIPTION
  *
- * Transaction Related Data Structures Interface
+ * Transaction Interface
  **/
 
 #pragma once
@@ -66,25 +66,32 @@ public:
     };
 
 private:
-    bool ro_{false};                // read only
-    uint32_t rv_{0};                // read version
-    BloomFilter<10, 3> wb_;         // write bloom
+    bool ro_;         // read only
+    uint32_t rv_;     // read version
+    shared_t region_; // memory region
+
+    BloomFilter<10, 3> wbf_;        // write bloom
     DoublyLinkedList<ReadLog> rs_;  // read set
     DoublyLinkedList<WriteLog> ws_; // write set
 
 public:
+    Transaction(bool ro, uint32_t rv, shared_t region);
+
     inline bool ro() { return ro_; }
     inline void ro(bool ro) { ro_ = ro; }
 
     inline uint32_t rv() { return rv_; }
     inline void rv(uint32_t rv) { rv_ = rv; }
 
-    BloomFilter<10, 3> &wb() { return wb_; }
-    DoublyLinkedList<ReadLog> &rs() { return rs_; }
-    DoublyLinkedList<WriteLog> &ws() { return ws_; }
+    inline shared_t region() { return region_; }
+    inline void region(shared_t region) { region_ = region; }
+
+    inline BloomFilter<10, 3> &wbf() { return wbf_; }
+    inline DoublyLinkedList<ReadLog> &rs() { return rs_; }
+    inline DoublyLinkedList<WriteLog> &ws() { return ws_; }
 
     void Commit();
     bool LockWriteSet();
-    void UnlockWriteSet();
     bool ValidateReadSet();
+    void UnlockWriteSet(unsigned int wv);
 };

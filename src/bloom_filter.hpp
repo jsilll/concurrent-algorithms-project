@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   bloom_filter.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -23,10 +23,10 @@
 
 #pragma once
 
-// External Exclude
+// External Headers
 #include <array>
 
-// Internal Includes
+// Internal Headers
 #include "murmur_hash3.hpp"
 
 
@@ -39,14 +39,9 @@
 template <int M, int K>
 class BloomFilter
 {
-    std::array<bool, M> bits_;
+    std::array<bool, M> bits_ = {false};
 
 public:
-    BloomFilter()
-    {
-        Clear();
-    }
-
     void Clear() 
     {
         bits_.fill(false);

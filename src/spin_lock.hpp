@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   spin_lock.hpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -40,6 +40,7 @@ private:
 public:
     bool Lock();
     void Unlock();
+    void Unlock(unsigned int wv);
     
     bool IsLocked();
     unsigned int Version();

@@ -1,5 +1,5 @@
 /**
- * @file   tm.cpp
+ * @file   transaction.cpp
  * @author João Silveira <joao.freixialsilveira@epfl.ch>
  *
  * @section LICENSE
@@ -18,7 +18,7 @@
  *
  * @section DESCRIPTION
  *
- * Transaction Related Data Structures Implementation
+ * Transaction Implementation
  **/
 
 #include "transaction.hpp"
@@ -43,6 +43,11 @@ Transaction::ReadLog::ReadLog(const Segment *segment)
 {
 }
 
+Transaction::Transaction(bool ro, uint32_t rv, shared_t region) 
+: ro_(ro), rv_(rv), region_(region)
+{
+}
+
 bool Transaction::ValidateReadSet()
 {
     auto rs_node = rs_.begin();
@@ -61,18 +66,16 @@ bool Transaction::ValidateReadSet()
     return true;
 }
 
-void Transaction::Commit() 
+void Transaction::Commit()
 {
     auto ws_node = ws_.begin();
-    while (ws_node != nullptr) 
+    while (ws_node != nullptr)
     {
-        auto src = ws_node->content.value;
-        auto size = ws_node->content.size;
-        auto dest = ws_node->content.segment->data;
-        memcpy(dest, src, size);
+        memcpy(ws_node->content.segment->data, ws_node->content.value, ws_node->content.size);
+
+        ws_node = ws_node->next;
     }
 }
-
 
 bool Transaction::LockWriteSet()
 {
@@ -100,12 +103,12 @@ bool Transaction::LockWriteSet()
     return true;
 }
 
-void Transaction::UnlockWriteSet()
+void Transaction::UnlockWriteSet(unsigned int wv)
 {
     auto ws_node = ws_.begin();
     while (ws_node != nullptr)
     {
-        ws_node->content.segment->versioned_write_lock.Unlock();
+        ws_node->content.segment->versioned_write_lock.Unlock(wv);
         ws_node = ws_node->next;
     }
 }
