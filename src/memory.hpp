@@ -36,11 +36,13 @@
  */
 struct Segment
 {
-    void *data{nullptr};
+    void *data{nullptr}; // needs to be first
+    
+    size_t align;
     SpinLock versioned_write_lock;
 
     Segment(size_t size, size_t align);
-    
+
     ~Segment();
 };
 

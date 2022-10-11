@@ -24,12 +24,24 @@
 #include "transaction.hpp"
 
 // External Headers
+#include <new>
 #include <cstring>
+
+// Internal Headers
+#include "expect.hpp"
 
 Transaction::WriteLog::WriteLog(const Segment *segment, const size_t size, const void *source)
     : segment(const_cast<Segment *>(segment)), size(size)
 {
-    value = std::malloc(size);
+    // int res = posix_memalign(&value, segment->align, size);
+
+    value = malloc(size);
+
+    if (value == nullptr)
+    {
+        throw std::bad_alloc();
+    }
+
     memcpy(value, source, size);
 }
 
@@ -43,8 +55,8 @@ Transaction::ReadLog::ReadLog(const Segment *segment)
 {
 }
 
-Transaction::Transaction(bool ro, uint32_t rv, shared_t region) 
-: ro_(ro), rv_(rv), region_(region)
+Transaction::Transaction(bool ro, uint32_t rv, shared_t region)
+    : ro_(ro), rv_(rv), region_(region)
 {
 }
 
@@ -72,7 +84,6 @@ void Transaction::Commit()
     while (ws_node != nullptr)
     {
         memcpy(ws_node->content.segment->data, ws_node->content.value, ws_node->content.size);
-
         ws_node = ws_node->next;
     }
 }

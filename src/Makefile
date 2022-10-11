@@ -26,9 +26,9 @@ LDLIBS   :=
 
 .PHONY: build clean
 
-debug: CXXFLAGS += -DDEBUG -g
-debug: CCFLAGS += -DDEBUG -g
-debug: build
+# debug: CXXFLAGS += -DDEBUG -g -O0
+# debug: CCFLAGS += -DDEBUG -g -O0
+# debug: build
 
 build: $(BIN)
 clean:

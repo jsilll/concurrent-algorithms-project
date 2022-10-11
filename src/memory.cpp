@@ -25,6 +25,7 @@
 
 // External Headers
 #include <new>
+#include <cerrno>
 #include <cstring>
 #include <cstdlib>
 
@@ -32,10 +33,11 @@
 #include "expect.hpp"
 
 Segment::Segment(size_t size, size_t align)
+: align(align)
 {
-    data = aligned_alloc(align, size);
-
-    if (unlikely(data == nullptr))
+    int res = posix_memalign(&data, align, size);
+    
+    if (res != 0)
     {
         throw std::bad_alloc();
     }
