@@ -21,291 +21,128 @@
  * Implementation of the STM.
  **/
 
-#include <tm.hpp>
+// Needed features
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#define _POSIX_C_SOURCE 200809L
+#ifdef __STDC_NO_ATOMICS__
+#error Current C11 compiler does not support atomic operations
+#endif
 
-// External Headers
-#include <atomic>
-#include <cstring>
-#include <exception>
-
-// Internal Headers
-#include "expect.hpp"
+// Internal headers
+#include "tm.hpp"
 #include "memory.hpp"
-#include "transaction.hpp"
 
-/**
- * @brief Global version clock, as described in TL2
- *
- */
-
-/**
- * @brief Current transaction being run
- */
-// static thread_local Transaction transaction;
-
-/** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
- * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
- * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
- * @return Opaque shared memory region handle, 'invalid_shared' on failure
- **/
 shared_t tm_create(size_t size, size_t align) noexcept
 {
-    try
-    {
-        return static_cast<shared_t>(new SharedRegion(size, align));
-    }
-    catch (const std::exception &e)
-    {
-        return invalid_shared;
-    }
+  return static_cast<shared_t>(new SharedMemory(size, align));
 }
 
-/** Destroy (i.e. clean-up + free) a given shared memory region.
- * @param shared Shared memory region to destroy, with no running transaction
- **/
 void tm_destroy(shared_t shared) noexcept
 {
-    delete static_cast<SharedRegion *>(shared);
+  delete static_cast<SharedMemory *>(shared);
 }
 
-/** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
- * @param shared Shared memory region to query
- * @return Start address of the first allocated segment
- **/
 void *tm_start(shared_t shared) noexcept
 {
-    return static_cast<SharedRegion *>(shared)->first.start;
+  ObjectId addr = static_cast<SharedMemory *>(shared)->start_addr();
+  return reinterpret_cast<void *>(addr.to_opaque());
 }
 
-/** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
- * @param shared Shared memory region to query
- * @return First allocated segment size
- **/
 size_t tm_size(shared_t shared) noexcept
 {
-    return static_cast<SharedRegion *>(shared)->size;
+  return static_cast<SharedMemory *>(shared)->size();
 }
 
-/** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
- * @param shared Shared memory region to query
- * @return Alignment used globally
- **/
 size_t tm_align(shared_t shared) noexcept
 {
-    return static_cast<SharedRegion *>(shared)->align;
+  return static_cast<SharedMemory *>(shared)->alignment();
 }
 
-/** [thread-safe] Begin a new transaction on the given shared memory region.
- * @param shared Shared memory region to start a transaction on
- * @param is_ro  Whether the transaction is read-only
- * @return Opaque transaction ID, 'invalid_tx' on failure
- **/
-tx_t tm_begin(shared_t shared, bool ro) noexcept
+tx_t tm_begin(shared_t shared, bool is_ro) noexcept
 {
-    auto region = static_cast<SharedRegion *>(shared);
-    return reinterpret_cast<tx_t>(new Transaction(ro, region));
+  auto memory = static_cast<SharedMemory *>(shared);
+  return reinterpret_cast<tx_t>(memory->begin_tx(is_ro));
 }
 
-/** [thread-safe] End the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to end
- * @return Whether the whole transaction committed
- **/
 bool tm_end(shared_t shared, tx_t tx) noexcept
 {
-    auto region = reinterpret_cast<SharedRegion *>(shared);
-    auto transaction = reinterpret_cast<Transaction *>(tx);
+  auto memory = static_cast<SharedMemory*>(shared);
+  auto transaction = reinterpret_cast<Transaction*>(tx);
 
-    if (transaction->ro())
-    {
-        return true;
-    }
+  bool res = memory->end_tx(*transaction);
 
-    // Lock the write-set in any convenient order using
-    // bounded-spinning to avoid indefinite dealock.
-    if (!transaction->LockWriteSet())
-    {
-        return false;
-    }
-
-    // Upon successful completion of lock acquisition of all
-    // locks in the write-set perform an increment and fetch
-    auto wv = region->gv.fetch_add(1) + 1;
-
-    // In the special case where rv + 1 it is not necessary to
-    // validate the read-set, as it is guaranteed that no
-    // concurrently executing transaction could have modified it.
-    if ((transaction->rv() + 1) == wv)
-    {
-        // For each location in the write-set, store to the location
-        // the new value from the write-set and release the locations lock
-        // by setting the version value to the write-version wv clearing
-        // the
-        transaction->UnlockWriteSet(wv);
-        return true;
-    }
-
-    // Validate for each location in the read-set that the version
-    // number associated with the versioned-write-lock is <= rv.
-    // We also verify that these memory locations have not been locked by other threads.
-    if (!transaction->ValidateReadSet())
-    {
-        transaction->UnlockWriteSet(wv);
-        return false;
-    }
-
-    transaction->Commit();
-    transaction->UnlockWriteSet(wv);
-    return true;
+  delete transaction;
+  return res;
 }
 
-/** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param source Source start address (in the shared region)
- * @param size   Length to copy (in bytes), must be a positive multiple of the alignment
- * @param target Target start address (in a private region)
- * @return Whether the whole transaction can continue
- **/
-bool tm_read([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
+bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
-    auto transaction = reinterpret_cast<Transaction *>(tx);
+  auto dest = static_cast<char *>(target);
+  auto memory = static_cast<SharedMemory*>(shared);
+  auto transaction = reinterpret_cast<Transaction*>(tx);
 
-    // Using a bloom filter, first check if the
-    // load adress already appears in the write-set, if so
-    // it returns the last value written (provides the illusion
-    // of processor consistency and avoids read-after-write-hazards).
-    if (!transaction->ro() && transaction->wbf().Lookup(source, sizeof(Segment *)))
+  std::size_t offset = 0;
+  auto start = to_object_id(source);
+  auto align = memory->alignment();
+  while (offset < size)
+  {
+    if (!memory->read_word(*transaction, start + offset, dest + offset))
     {
-        auto node = transaction->ws().end();
-
-        for (const auto &write : transaction->ws())
-        {
-            if (write.dest == source)
-            {
-                // A load instruction sampling the associated lock is inserted before each original load,
-                // which is then followed by post-validation code checking that the location's versioned
-                // write-lock is free and has not changed.
-                if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
-                {
-                    return false;
-                }
-
-                try
-                {
-                    transaction->rs().push_back(ReadLog(source));
-                }
-                catch (const std::exception &e)
-                {
-                    return false;
-                }
-
-                std::memcpy(target, write.value, size);
-
-                return true;
-            }
-        }
-
-        while (node != nullptr)
-        {
-
-            node = node->prev;
-        }
+      delete transaction;
+      return false;
     }
 
-    try
-    {
-        auto read_log = new DoublyLinkedList<Transaction::ReadLog>::Node(segment);
-        transaction->rs().PushBack(read_log);
-    }
-    catch (const std::exception &e)
-    {
-        return false;
-    }
+    offset += align;
+  }
 
-    // A load instruction sampling the associated lock is inserted before each original load,
-    // which is then followed by post-validation code checking that the location's versioned
-    // write-lock is free and has not changed.
-    if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
-    {
-        return false;
-    }
-
-    std::memcpy(target, source, size);
-
-    return true;
+  return true;
 }
 
-/** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param source Source start address (in a private region)
- * @param size   Length to copy (in bytes), must be a positive multiple of the alignment
- * @param target Target start address (in the shared region)
- * @return Whether the whole transaction can continue
- **/
-bool tm_write([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
+bool tm_write(shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
-    auto transaction = reinterpret_cast<Transaction *>(tx);
-    auto segment = reinterpret_cast<const Segment *>(target);
-    transaction->wbf().Insert(segment, sizeof(Segment *));
+  auto src = static_cast<const char *>(source);
+  auto memory = static_cast<SharedMemory*>(shared);
+  auto transaction = reinterpret_cast<Transaction*>(tx);
 
-    try
+  std::size_t offset = 0;
+  auto start = to_object_id(target);
+  while (offset < size)
+  {
+    if (!memory->write_word(*transaction, src + offset, start + offset))
     {
-        transaction->ws().push_back(WriteLog(target, size, source));
-    }
-    catch (const std::exception &e)
-    {
-        return false;
+      delete transaction;
+      return false;
     }
 
-    return true;
+    offset += memory->alignment();
+  }
+
+  return true;
 }
 
-/** [thread-safe] Memory allocation in the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param size   Allocation requested size (in bytes), must be a positive multiple of the alignment
- * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
- * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
- **/
-Alloc tm_alloc(shared_t shared, [[maybe_unused]] tx_t tx, size_t size, void **target) noexcept
+Alloc tm_alloc(shared_t shared, tx_t tx, size_t size, void **target) noexcept
 {
-    try
-    {
-        auto region = static_cast<SharedRegion *>(shared);
-        auto node = new DoublyLinkedList<Segment>::Node(size, region->align);
-        region->allocs.PushBack(node);
-        *target = node->content.start;
-        return Alloc::success;
-    }
-    catch (const std::exception &e)
-    {
-        return Alloc::nomem;
-    }
+  auto memory = static_cast<SharedMemory*>(shared);
+  auto transaction = reinterpret_cast<Transaction*>(tx);
+
+  ObjectId addr;
+  if (!memory->allocate(*transaction, size, &addr))
+  {
+    return Alloc::nomem;
+  }
+
+  *target = reinterpret_cast<void *>(addr.to_opaque());
+  return Alloc::success;
 }
 
-/** [thread-safe] Memory freeing in the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param segment Address of the first byte of the previously allocated segment to deallocate
- * @return Whether the whole transaction can continue
- **/
-
-bool tm_free(shared_t shared, [[maybe_unused]] tx_t tx, void *segment) noexcept
+bool tm_free(shared_t shared, tx_t tx, void *target) noexcept
 {
-    auto node = reinterpret_cast<DoublyLinkedList<Segment>::Node *>(segment);
-
-    if (node->prev == nullptr)
-    {
-        static_cast<SharedRegion *>(shared)->allocs.PopFront();
-    }
-    else if (node->next == nullptr)
-    {
-        static_cast<SharedRegion *>(shared)->allocs.PopBack();
-    }
-
-    delete node;
-
-    return true;
+  auto memory = static_cast<SharedMemory*>(shared);
+  auto transaction = reinterpret_cast<Transaction*>(tx);
+  
+  auto id = to_object_id(target);
+  memory->free(*transaction, id);
+  return true;
 }

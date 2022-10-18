@@ -1,67 +1,63 @@
-/**
- * @file   memory.hpp
- * @author João Silveira <joao.freixialsilveira@epfl.ch>
- *
- * @section LICENSE
- *
- * Copyright © 2018-2021 Sébastien Rouault.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * any later version. Please see https://gnu.org/licenses/gpl.html
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * @section DESCRIPTION
- *
- * STM's memory layout Interface.
- **/
-
 #pragma once
 
-// External Headers
-#include <tm.hpp>
-#include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <utility>
 #include <vector>
 
-// Internal Headers
-#include "spin_lock.hpp"
+#include "segment.hpp"
+#include "transaction.hpp"
+#include "segment_manager.hpp"
 
-/**
- * @brief Segment of Memory
- *
- */
-struct Segment
+class SharedMemory
 {
-    size_t size;
-    size_t align;
+public:
+  SharedMemory(std::size_t size, std::size_t align) noexcept
+      : align(align), allocator(size, align) {}
 
-    void *start{nullptr};
-    Segment *next{nullptr};
-    Segment *prev{nullptr};
+  ~SharedMemory() noexcept;
 
-    SpinLock versioned_write_lock;
+  SharedMemory(SharedMemory &&) = delete;
+  SharedMemory &operator=(SharedMemory &&) = delete;
 
-    Segment(size_t size, size_t align);
+  SharedMemory(const SharedMemory &) = delete;
+  SharedMemory &operator=(const SharedMemory &) = delete;
 
-    ~Segment();
-};
+  [[nodiscard]] Transaction* begin_tx(bool is_ro) noexcept;
+  bool end_tx(Transaction &tx) noexcept;
 
-/**
- * @brief Shared Memory Region.
- */
-struct SharedRegion
-{
-    size_t size;
-    size_t align;
-    Segment first;
+  bool read_word(Transaction &tx, ObjectId src, char *dest) noexcept;
+  bool write_word(Transaction &tx, const char *src, ObjectId dest) noexcept;
 
-    std::atomic_uint gv{0};
+  bool allocate(Transaction &tx, std::size_t size, ObjectId *addr) noexcept;
+  void free(Transaction &tx, ObjectId addr) noexcept;
 
-    SharedRegion(size_t size, size_t align);
-    ~SharedRegion();
+  [[nodiscard]] std::size_t size() const noexcept
+  {
+    return allocator.first_segment().size_bytes();
+  };
+
+  [[nodiscard]] std::size_t alignment() const noexcept { return align; };
+
+  [[nodiscard]] ObjectId start_addr() const noexcept
+  {
+    return allocator.first_addr();
+  }
+
+private:
+  void ref(TransactionDescriptor *desc);
+  void unref(TransactionDescriptor *desc);
+
+  void commit_frees(TransactionDescriptor &desc);
+
+  void abort(Transaction &tx);
+  void commit_changes(Transaction &tx);
+
+  void read_word_readonly(const Transaction &tx, const Object &obj,
+                          char *dest) const noexcept;
+
+  std::size_t align;
+  SegmentAllocator allocator;
+  std::atomic<TransactionDescriptor *> current{new TransactionDescriptor{0}};
+  std::mutex descriptor_mutex;
 };
