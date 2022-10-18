@@ -37,7 +37,6 @@
  * @brief Global version clock, as described in TL2
  *
  */
-static std::atomic_uint gv{0};
 
 /**
  * @brief Current transaction being run
@@ -53,7 +52,7 @@ shared_t tm_create(size_t size, size_t align) noexcept
 {
     try
     {
-        return static_cast<void *>(new SharedRegion(size, align));
+        return static_cast<shared_t>(new SharedRegion(size, align));
     }
     catch (const std::exception &e)
     {
@@ -75,7 +74,7 @@ void tm_destroy(shared_t shared) noexcept
  **/
 void *tm_start(shared_t shared) noexcept
 {
-    return static_cast<void *>(static_cast<SharedRegion *>(shared)->first.data);
+    return static_cast<SharedRegion *>(shared)->first.start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -103,14 +102,8 @@ size_t tm_align(shared_t shared) noexcept
  **/
 tx_t tm_begin(shared_t shared, bool ro) noexcept
 {
-    try
-    {
-        return reinterpret_cast<tx_t>(new Transaction(ro, gv.load(), shared));
-    }
-    catch (const std::exception &e)
-    {
-        return invalid_tx;
-    }
+    auto region = static_cast<SharedRegion *>(shared);
+    return reinterpret_cast<tx_t>(new Transaction(ro, region));
 }
 
 /** [thread-safe] End the given transaction.
@@ -118,8 +111,9 @@ tx_t tm_begin(shared_t shared, bool ro) noexcept
  * @param tx     Transaction to end
  * @return Whether the whole transaction committed
  **/
-bool tm_end([[maybe_unused]] shared_t shared, tx_t tx) noexcept
+bool tm_end(shared_t shared, tx_t tx) noexcept
 {
+    auto region = reinterpret_cast<SharedRegion *>(shared);
     auto transaction = reinterpret_cast<Transaction *>(tx);
 
     if (transaction->ro())
@@ -136,7 +130,7 @@ bool tm_end([[maybe_unused]] shared_t shared, tx_t tx) noexcept
 
     // Upon successful completion of lock acquisition of all
     // locks in the write-set perform an increment and fetch
-    auto wv = gv.fetch_add(1) + 1;
+    auto wv = region->gv.fetch_add(1) + 1;
 
     // In the special case where rv + 1 it is not necessary to
     // validate the read-set, as it is guaranteed that no
@@ -176,18 +170,18 @@ bool tm_end([[maybe_unused]] shared_t shared, tx_t tx) noexcept
 bool tm_read([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size_t size, void *target) noexcept
 {
     auto transaction = reinterpret_cast<Transaction *>(tx);
-    auto segment = const_cast<Segment *>(reinterpret_cast<const Segment *>(source));
 
     // Using a bloom filter, first check if the
     // load adress already appears in the write-set, if so
     // it returns the last value written (provides the illusion
     // of processor consistency and avoids read-after-write-hazards).
-    if (!transaction->ro() && transaction->wbf().Lookup(segment, sizeof(Segment *)))
+    if (!transaction->ro() && transaction->wbf().Lookup(source, sizeof(Segment *)))
     {
         auto node = transaction->ws().end();
-        while (node != nullptr)
+
+        for (const auto &write : transaction->ws())
         {
-            if (node->content.segment == segment)
+            if (write.dest == source)
             {
                 // A load instruction sampling the associated lock is inserted before each original load,
                 // which is then followed by post-validation code checking that the location's versioned
@@ -199,18 +193,22 @@ bool tm_read([[maybe_unused]] shared_t shared, tx_t tx, void const *source, size
 
                 try
                 {
-                    auto read_log = new DoublyLinkedList<Transaction::ReadLog>::Node(segment);
-                    transaction->rs().PushBack(read_log);
+                    transaction->rs().push_back(ReadLog(source));
                 }
                 catch (const std::exception &e)
                 {
                     return false;
                 }
 
-                std::memcpy(target, node->content.value, size);
+                std::memcpy(target, write.value, size);
 
                 return true;
             }
+        }
+
+        while (node != nullptr)
+        {
+
             node = node->prev;
         }
     }
@@ -254,8 +252,7 @@ bool tm_write([[maybe_unused]] shared_t shared, tx_t tx, void const *source, siz
 
     try
     {
-        auto write_log = new DoublyLinkedList<Transaction::WriteLog>::Node(segment, size, source);
-        transaction->ws().PushBack(write_log);
+        transaction->ws().push_back(WriteLog(target, size, source));
     }
     catch (const std::exception &e)
     {
@@ -279,7 +276,7 @@ Alloc tm_alloc(shared_t shared, [[maybe_unused]] tx_t tx, size_t size, void **ta
         auto region = static_cast<SharedRegion *>(shared);
         auto node = new DoublyLinkedList<Segment>::Node(size, region->align);
         region->allocs.PushBack(node);
-        *target = node->content.data;
+        *target = node->content.start;
         return Alloc::success;
     }
     catch (const std::exception &e)

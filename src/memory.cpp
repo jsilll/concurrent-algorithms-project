@@ -33,24 +33,33 @@
 #include "expect.hpp"
 
 Segment::Segment(size_t size, size_t align)
-: align(align)
+: size(size), align(align), versioned_locks(size / align, 0)
 {
-    int res = posix_memalign(&data, align, size);
+    int res = posix_memalign(&start, align, size);
     
     if (res != 0)
     {
         throw std::bad_alloc();
     }
 
-    std::memset(data, 0, size);
+    std::memset(start, 0, size);
 }
 
 Segment::~Segment()
 {
-    std::free(data);
+    std::free(start);
 }
 
 SharedRegion::SharedRegion(size_t size, size_t align)
     : size(size), align(align), first(size, align)
+{}
+
+SharedRegion::~SharedRegion() 
 {
+    while (first.next != nullptr) 
+    {
+        auto next = first.next;
+        first.next = first.next->next;
+        delete next;
+    }
 }

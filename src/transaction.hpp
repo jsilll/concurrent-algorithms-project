@@ -23,10 +23,15 @@
 
 #pragma once
 
+// External Headers
+#include <new>
+#include <list>
+#include <cstring>
+
 // Internal Headers
+#include "expect.hpp"
 #include "memory.hpp"
 #include "bloom_filter.hpp"
-#include "doubly_linked_list.hpp"
 
 /**
  * @brief Transaction
@@ -43,13 +48,29 @@ public:
      */
     struct WriteLog
     {
-        Segment *segment;
+        void *dest;
         const size_t size;
         void *value;
 
-        WriteLog(const Segment *segment, const size_t size, const void *source);
+        WriteLog(void *dest, const size_t size, const void *source)
+            : dest(dest), size(size)
+        {
+            // int res = posix_memalign(&value, segment->align, size);
 
-        ~WriteLog();
+            value = malloc(size);
+
+            if (unlikely(value == nullptr))
+            {
+                throw std::bad_alloc();
+            }
+
+            memcpy(value, source, size);
+        }
+
+        ~WriteLog()
+        {
+            std::free(value);
+        }
     };
 
     /**
@@ -60,22 +81,24 @@ public:
      */
     struct ReadLog
     {
-        Segment *segment;
+        void *src;
 
-        ReadLog(const Segment *segment);
+        ReadLog(void *src) 
+        : src(src) {};
     };
 
 private:
-    bool ro_;         // read only
-    uint32_t rv_;     // read version
-    shared_t region_; // memory region
+    bool ro_;              // read only
+    uint32_t rv_;          // read version
+    SharedRegion *region_; // memory region
 
-    BloomFilter<10, 3> wbf_;        // write bloom
-    DoublyLinkedList<ReadLog> rs_;  // read set
-    DoublyLinkedList<WriteLog> ws_; // write set
+    std::list<ReadLog> rs_;  // read set
+    std::list<WriteLog> ws_; // write set
+    BloomFilter<10, 3> wbf_; // write bloom
 
 public:
-    Transaction(bool ro, uint32_t rv, shared_t region);
+    Transaction(bool ro, SharedRegion *region)
+        : ro_(ro), rv_(region->gv.load()), region_(region) {}
 
     inline bool ro() { return ro_; }
     inline void ro(bool ro) { ro_ = ro; }
@@ -83,15 +106,79 @@ public:
     inline uint32_t rv() { return rv_; }
     inline void rv(uint32_t rv) { rv_ = rv; }
 
-    inline shared_t region() { return region_; }
-    inline void region(shared_t region) { region_ = region; }
+    inline SharedRegion *region() { return region_; }
 
+    inline std::list<ReadLog> &rs() { return rs_; }
+    inline std::list<WriteLog> &ws() { return ws_; }
     inline BloomFilter<10, 3> &wbf() { return wbf_; }
-    inline DoublyLinkedList<ReadLog> &rs() { return rs_; }
-    inline DoublyLinkedList<WriteLog> &ws() { return ws_; }
 
-    void Commit();
-    bool LockWriteSet();
-    bool ValidateReadSet();
-    void UnlockWriteSet(unsigned int wv);
+    void Commit()
+    {
+        // TODO
+
+        // auto ws_node = ws_.begin();
+        // for (auto const &write : ws_)
+        // {
+        //     memcpy(write.segment->start, write.value, write.size);
+        // }
+
+        // while (ws_node != nullptr)
+        // {
+        //     ws_node = ws_node->next;
+        // }
+    }
+
+    bool LockWriteSet()
+    {
+        auto ws_node = ws_.begin();
+        while (ws_node != nullptr)
+        {
+            // In case not all of these locks are
+            // successfully acquired, the transaction fails
+            if (!ws_node->content.segment->versioned_write_lock.Lock())
+            {
+                // Unlock all the previously acquired locks
+                ws_node = ws_node->prev;
+                while (ws_node != nullptr)
+                {
+                    ws_node->content.segment->versioned_write_lock.Unlock();
+                    ws_node = ws_node->prev;
+                }
+
+                return false;
+            }
+
+            ws_node = ws_node->prev;
+        }
+
+        return true;
+    }
+
+    bool ValidateReadSet()
+    {
+        // TODO
+
+        // for (auto const &read : rs_)
+        // {
+        //     if (read.segment->versioned_write_lock.IsLocked()
+        //     or rv_ < read.segment->versioned_write_lock.Version())
+        //     {
+        //         return false;
+        //     }
+        // }
+
+        return true;
+    }
+
+    void UnlockWriteSet(unsigned int wv)
+    {
+        // TODO
+
+        // auto ws_node = ws_.begin();
+        // while (ws_node != nullptr)
+        // {
+        //     ws_node->content.segment->versioned_write_lock.Unlock(wv);
+        //     ws_node = ws_node->next;
+        // }
+    }
 };

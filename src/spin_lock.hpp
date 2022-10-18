@@ -25,6 +25,7 @@
 
 // External Headers
 #include <atomic>
+#include <thread>
 
 /**
  * @brief Implmentation inspired from
@@ -38,10 +39,41 @@ private:
     std::atomic_uint version_{0};
 
 public:
-    bool Lock();
-    void Unlock();
-    void Unlock(unsigned int wv);
-    
-    bool IsLocked();
-    unsigned int Version();
+    bool Lock()
+    {
+        int i{0};
+        bool expected = false;
+        while (i < 10)
+        {
+            if (locked_.compare_exchange_strong(expected, true))
+            {
+                return true;
+            }
+
+            i++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        return false;
+    }
+
+    void Unlock()
+    {
+        locked_.store(false);
+    }
+    void Unlock(unsigned int wv)
+    {
+        version_.store(wv);
+        locked_.store(false);
+    }
+
+    bool IsLocked()
+    {
+        return locked_.load();
+    }
+
+    unsigned int Version()
+    {
+        return version_.load();
+    }
 };

@@ -25,10 +25,11 @@
 
 // External Headers
 #include <tm.hpp>
+#include <atomic>
+#include <vector>
 
 // Internal Headers
 #include "spin_lock.hpp"
-#include "doubly_linked_list.hpp"
 
 /**
  * @brief Segment of Memory
@@ -36,9 +37,13 @@
  */
 struct Segment
 {
-    void *data{nullptr}; // needs to be first
-    
+    size_t size;
     size_t align;
+
+    void *start{nullptr};
+    Segment *next{nullptr};
+    Segment *prev{nullptr};
+
     SpinLock versioned_write_lock;
 
     Segment(size_t size, size_t align);
@@ -54,7 +59,9 @@ struct SharedRegion
     size_t size;
     size_t align;
     Segment first;
-    DoublyLinkedList<Segment> allocs{};
+
+    std::atomic_uint gv{0};
 
     SharedRegion(size_t size, size_t align);
+    ~SharedRegion();
 };
