@@ -30,7 +30,7 @@ struct Transaction
     Object &obj;
   };
 
-  [[nodiscard]] WriteEntry *find_write_entry(ObjectId addr) noexcept
+  WriteEntry *find_write_entry(ObjectId addr) noexcept
   {
     for (auto &entry : write_set)
     {

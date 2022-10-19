@@ -20,12 +20,12 @@ struct ObjectVersion
   VersionedLock::Timestamp version = 0;
   ObjectVersion *earlier = nullptr;
 
-  void read(char *dst, std::size_t size) const noexcept
+  inline void read(char *dst, std::size_t size) const noexcept
   {
     std::memcpy(dst, buf.get(), size);
   }
 
-  void write(const char *src, std::size_t size) const noexcept
+  inline void write(const char *src, std::size_t size) const noexcept
   {
     std::memcpy(buf.get(), src, size);
   }
@@ -47,18 +47,18 @@ struct ObjectId
   {
     return (std::size_t(segment) << 56) | (1ul << 55) | offset;
   }
+  
+  inline friend ObjectId &operator+=(ObjectId &id, std::size_t offset) noexcept
+  {
+    id.offset += offset;
+    return id;
+  }
+
+  inline friend ObjectId operator+(ObjectId id, std::size_t offset) noexcept
+  {
+    return id += offset;
+  }
 };
-
-inline ObjectId &operator+=(ObjectId &id, std::size_t offset) noexcept
-{
-  id.offset += offset;
-  return id;
-}
-
-inline ObjectId operator+(ObjectId id, std::size_t offset) noexcept
-{
-  return id += offset;
-}
 
 inline ObjectId to_object_id(const void *id) noexcept
 {
@@ -112,27 +112,27 @@ public:
   }
 
   // Returns true if marking succeeded
-  bool mark_for_deletion() { return !should_delete.test_and_set(); }
+  inline bool mark_for_deletion() { return !should_delete.test_and_set(); }
 
-  void cancel_deletion() { return should_delete.clear(); }
+  inline void cancel_deletion() { return should_delete.clear(); }
 
-  [[nodiscard]] Object &operator[](std::size_t idx) noexcept
+  Object &operator[](std::size_t idx) noexcept
   {
     return objects[idx];
   }
 
-  [[nodiscard]] const Object &operator[](std::size_t idx) const noexcept
+  const Object &operator[](std::size_t idx) const noexcept
   {
     return objects[idx];
   }
 
-  [[nodiscard]] std::size_t size_bytes() const noexcept
+  std::size_t size_bytes() const noexcept
   {
     return num_objects * align;
   }
 
 private:
-  std::atomic_flag should_delete = ATOMIC_FLAG_INIT;
   std::size_t num_objects = 0, align = 1;
   std::unique_ptr<Object[]> objects = nullptr;
+  std::atomic_flag should_delete = ATOMIC_FLAG_INIT;
 };

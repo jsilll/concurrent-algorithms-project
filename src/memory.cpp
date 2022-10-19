@@ -57,8 +57,7 @@ bool SharedMemory::read_word(Transaction &tx, ObjectId src,
   return true;
 }
 
-void SharedMemory::read_word_readonly(const Transaction &tx, const Object &obj,
-                                      char *dst) const noexcept
+void SharedMemory::read_word_readonly(const Transaction &tx, const Object &obj, char *dst) const noexcept
 {
   auto ver = obj.latest.load(std::memory_order_acquire);
   while (ver->version > tx.start_time)

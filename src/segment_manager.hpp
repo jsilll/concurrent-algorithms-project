@@ -38,7 +38,7 @@ public:
     return true;
   }
 
-  void free(ObjectId addr)
+  inline void free(ObjectId addr)
   {
     std::unique_lock<std::mutex> lock(mutex);
     all_segments[addr.segment].deallocate();
@@ -65,6 +65,7 @@ public:
 
 private:
   static constexpr std::uint8_t MAX_SEGMENTS = 255;
+  
   std::size_t align, shift_offset = 0;
 
   std::mutex mutex;

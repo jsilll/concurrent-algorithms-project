@@ -23,7 +23,7 @@ public:
   SharedMemory(const SharedMemory &) = delete;
   SharedMemory &operator=(const SharedMemory &) = delete;
 
-  [[nodiscard]] Transaction* begin_tx(bool is_ro) noexcept;
+  Transaction* begin_tx(bool is_ro) noexcept;
   bool end_tx(Transaction &tx) noexcept;
 
   bool read_word(Transaction &tx, ObjectId src, char *dest) noexcept;
@@ -32,14 +32,14 @@ public:
   bool allocate(Transaction &tx, std::size_t size, ObjectId *addr) noexcept;
   void free(Transaction &tx, ObjectId addr) noexcept;
 
-  [[nodiscard]] std::size_t size() const noexcept
+  inline std::size_t size() const noexcept
   {
     return allocator.first_segment().size_bytes();
   };
 
-  [[nodiscard]] std::size_t alignment() const noexcept { return align; };
+  std::size_t alignment() const noexcept { return align; };
 
-  [[nodiscard]] ObjectId start_addr() const noexcept
+  inline ObjectId start_addr() const noexcept
   {
     return allocator.first_addr();
   }
@@ -53,8 +53,7 @@ private:
   void abort(Transaction &tx);
   void commit_changes(Transaction &tx);
 
-  void read_word_readonly(const Transaction &tx, const Object &obj,
-                          char *dest) const noexcept;
+  void read_word_readonly(const Transaction &tx, const Object &obj, char *dest) const noexcept;
 
   std::size_t align;
   SegmentAllocator allocator;

@@ -9,23 +9,23 @@ class VersionedLock
 public:
   using Timestamp = std::uint_fast32_t;
 
-  [[nodiscard]] Timestamp version() const noexcept
+  Timestamp version() const noexcept
   {
     return counter.load(std::memory_order_acquire) & VERSION_MASK;
   }
 
-  [[nodiscard]] bool locked() const noexcept
+  bool locked() const noexcept
   {
     return counter.load(std::memory_order_acquire) & LOCKED_MASK;
   }
 
-  [[nodiscard]] bool validate(Timestamp last_seen) noexcept
+  bool validate(Timestamp last_seen) noexcept
   {
     auto current = counter.load(std::memory_order_acquire);
     return !(current & LOCKED_MASK || (current & VERSION_MASK) > last_seen);
   }
 
-  [[nodiscard]] bool try_lock(Timestamp last_seen) noexcept
+  bool try_lock(Timestamp last_seen) noexcept
   {
     auto current = counter.load(std::memory_order_acquire);
     if (current & LOCKED_MASK || (current & VERSION_MASK) > last_seen)
