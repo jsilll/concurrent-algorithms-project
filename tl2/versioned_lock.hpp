@@ -14,13 +14,14 @@ public:
   };
 
 private:
-  static inline std::uint32_t LOCKED_MASK = 0x80000000;
-  static inline std::uint32_t VERSION_MASK = ~LOCKED_MASK;
+  static constexpr std::uint32_t LOCKED_MASK = 0x80000000;
+  static constexpr std::uint32_t VERSION_MASK = ~LOCKED_MASK;
 
 private:
   std::atomic_uint32_t counter{0};
 
 public:
+
   TimeStamp Sample() const noexcept
   {
     auto val = counter.load();

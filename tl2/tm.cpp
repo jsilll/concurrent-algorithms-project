@@ -127,7 +127,7 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
       }
       else
       {
-        memcpy(target_addr, &word.word, region->align);
+        memcpy(target_addr, &word.data, region->align);
       }
     }
   }
@@ -159,7 +159,7 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
         }
         else
         {
-          memcpy(target_addr, &word.word, region->align);
+          memcpy(target_addr, &word.data, region->align);
         }
       }
     }
@@ -215,6 +215,7 @@ Alloc tm_alloc(shared_t shared, tx_t tx, size_t size, void **target) noexcept
   std::cout << "tm_alloc()" << std::endl;
 #endif
   auto region = static_cast<Region *>(shared);
+  region->mem.emplace_back(size);
   *target = reinterpret_cast<void *>(region->segs.fetch_add(1) << 32);
   return Alloc::success;
 }
