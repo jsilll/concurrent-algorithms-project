@@ -103,56 +103,47 @@ tx_t tm_begin(shared_t shared, bool ro) noexcept
  **/
 bool tm_end(shared_t shared, tx_t tx) noexcept
 {
-    auto region = static_cast<SharedRegion *>(shared);
-    auto transaction = reinterpret_cast<Transaction *>(tx);
+    if (transaction->ro())
+    {
+        return true;
+    }
 
-    bool res = region->end_tx(*transaction);
+    // Lock the write-set in any convenient order using
+    // bounded-spinning to avoid indefinite dealock.
+    if (!transaction->LockWriteSet())
+    {
+        return false;
+    }
 
-    delete transaction;
-    return res;
+    // Upon successful completion of lock acquisition of all
+    // locks in the write-set perform an increment and fetch
+    auto wv = region->gv.fetch_add(1) + 1;
 
-    // FIXME: put inside end_tx()
-    // if (transaction->ro())
-    // {
-    //     return true;
-    // }
+    // In the special case where rv + 1 it is not necessary to
+    // validate the read-set, as it is guaranteed that no
+    // concurrently executing transaction could have modified it.
+    if ((transaction->rv() + 1) == wv)
+    {
+        // For each location in the write-set, store to the location
+        // the new value from the write-set and release the locations lock
+        // by setting the version value to the write-version wv clearing
+        // the
+        transaction->UnlockWriteSet(wv);
+        return true;
+    }
 
-    // // Lock the write-set in any convenient order using
-    // // bounded-spinning to avoid indefinite dealock.
-    // if (!transaction->LockWriteSet())
-    // {
-    //     return false;
-    // }
+    // Validate for each location in the read-set that the version
+    // number associated with the versioned-write-lock is <= rv.
+    // We also verify that these memory locations have not been locked by other threads.
+    if (!transaction->ValidateReadSet())
+    {
+        transaction->UnlockWriteSet(wv);
+        return false;
+    }
 
-    // // Upon successful completion of lock acquisition of all
-    // // locks in the write-set perform an increment and fetch
-    // auto wv = region->gv.fetch_add(1) + 1;
-
-    // // In the special case where rv + 1 it is not necessary to
-    // // validate the read-set, as it is guaranteed that no
-    // // concurrently executing transaction could have modified it.
-    // if ((transaction->rv() + 1) == wv)
-    // {
-    //     // For each location in the write-set, store to the location
-    //     // the new value from the write-set and release the locations lock
-    //     // by setting the version value to the write-version wv clearing
-    //     // the
-    //     transaction->UnlockWriteSet(wv);
-    //     return true;
-    // }
-
-    // // Validate for each location in the read-set that the version
-    // // number associated with the versioned-write-lock is <= rv.
-    // // We also verify that these memory locations have not been locked by other threads.
-    // if (!transaction->ValidateReadSet())
-    // {
-    //     transaction->UnlockWriteSet(wv);
-    //     return false;
-    // }
-
-    // transaction->Commit();
-    // transaction->UnlockWriteSet(wv);
-    // return true;
+    transaction->Commit();
+    transaction->UnlockWriteSet(wv);
+    return true;
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -184,47 +175,46 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
 
     return true;
 
-    // FIXME: put inside read_word
-    // // Using a bloom filter, first check if the
-    // // load adress already appears in the write-set, if so
-    // // it returns the last value written (provides the illusion
-    // // of processor consistency and avoids read-after-write-hazards).
-    // if (!transaction->ro() && transaction->wbf().Lookup(segment, sizeof(Segment *)))
-    // {
-    //     for (auto it = transaction->ws().rbegin(); it != transaction->ws().rend(); ++it)
-    //     {
-    //         if (segment == (*it).segment)
-    //         {
-    //             // A load instruction sampling the associated lock is inserted before each original load,
-    //             // which is then followed by post-validation code checking that the location's versioned
-    //             // write-lock is free and has not changed.
-    //             if ((*it).segment->versioned_write_lock.IsLocked() or transaction->rv() < (*it).segment->versioned_write_lock.Version())
-    //             {
-    //                 return false;
-    //             }
+    // Using a bloom filter, first check if the
+    // load adress already appears in the write-set, if so
+    // it returns the last value written (provides the illusion
+    // of processor consistency and avoids read-after-write-hazards).
+    if (!transaction->ro() && transaction->wbf().Lookup(segment, sizeof(Segment *)))
+    {
+        for (auto it = transaction->ws().rbegin(); it != transaction->ws().rend(); ++it)
+        {
+            if (segment == (*it).segment)
+            {
+                // A load instruction sampling the associated lock is inserted before each original load,
+                // which is then followed by post-validation code checking that the location's versioned
+                // write-lock is free and has not changed.
+                if ((*it).segment->versioned_write_lock.IsLocked() or transaction->rv() < (*it).segment->versioned_write_lock.Version())
+                {
+                    return false;
+                }
 
-    //             transaction->rs().push_back(Transaction::ReadLog(segment));
+                transaction->rs().push_back(Transaction::ReadLog(segment));
 
-    //             std::memcpy(target, (*it).value, size);
+                std::memcpy(target, (*it).value, size);
 
-    //             return true;
-    //         }
-    //     }
-    // }
+                return true;
+            }
+        }
+    }
 
-    // transaction->rs().push_back(Transaction::ReadLog(segment));
+    transaction->rs().push_back(Transaction::ReadLog(segment));
 
-    // // A load instruction sampling the associated lock is inserted before each original load,
-    // // which is then followed by post-validation code checking that the location's versioned
-    // // write-lock is free and has not changed.
-    // if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
-    // {
-    //     return false;
-    // }
+    // A load instruction sampling the associated lock is inserted before each original load,
+    // which is then followed by post-validation code checking that the location's versioned
+    // write-lock is free and has not changed.
+    if (segment->versioned_write_lock.IsLocked() or transaction->rv() < segment->versioned_write_lock.Version())
+    {
+        return false;
+    }
 
-    // std::memcpy(target, source, size);
+    std::memcpy(target, source, size);
 
-    // return true;
+    return true;
 }
 
 /** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
