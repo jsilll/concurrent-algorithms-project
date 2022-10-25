@@ -7,9 +7,9 @@
 
 struct Transaction
 {
-    uint64_t rv;                                            // Read-Version
-    uint64_t wv{0};                                         // Write-Version
+    uint32_t rv;                                            // Read-Version
+    uint32_t wv{0};                                         // Write-Version
     bool ro;                                                // Read Only
-    std::unordered_set<uint64_t> read_set;                  // Set Of Read Words
-    std::map<uintptr_t, std::unique_ptr<char[]>> write_set; // Target Word Src Word Mapping
+    std::unordered_set<std::uintptr_t> read_set;                  // Set Of Read Words
+    std::map<std::uintptr_t, std::unique_ptr<char[]>> write_set; // Target Word Src Word Mapping
 };

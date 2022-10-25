@@ -16,7 +16,7 @@
 #include "expect.hpp"
 #include "region.hpp"
 #include "transaction.hpp"
-#include "version_lock.hpp"
+#include "versioned_lock.hpp"
 
 shared_t tm_create(size_t size, size_t align) noexcept
 {
@@ -116,8 +116,8 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
       Region::Word &word = region->word(addr);
       void *target_addr = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(target) + offset);
 
-      VersionLock::Value lockval = word.vlock.Sample();
-      if (lockval.locked or transaction->rv < lockval.version)
+      VersionedLock::TimeStamp ts = word.lock.Sample();
+      if (ts.locked or transaction->rv < ts.version)
       {
         delete transaction;
 #ifdef DEBUG
@@ -148,8 +148,8 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
       }
       else
       {
-        VersionLock::Value lockval = word.vlock.Sample();
-        if (lockval.locked or transaction->rv < lockval.version)
+        VersionedLock::TimeStamp ts = word.lock.Sample();
+        if (ts.locked or transaction->rv < ts.version)
         {
           delete transaction;
 #ifdef DEBUG
@@ -215,7 +215,7 @@ Alloc tm_alloc(shared_t shared, tx_t tx, size_t size, void **target) noexcept
   std::cout << "tm_alloc()" << std::endl;
 #endif
   auto region = static_cast<Region *>(shared);
-  *target = (void *)(region->segs.fetch_add(1) << 32);
+  *target = reinterpret_cast<void *>(region->segs.fetch_add(1) << 32);
   return Alloc::success;
 }
 
