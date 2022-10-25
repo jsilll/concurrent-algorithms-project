@@ -12,22 +12,24 @@ class Region
 public:
   struct Word
   {
-    std::uint64_t word;
     VersionLock vlock;
+    std::uint64_t word;
   };
 
-  struct Segment  
+  struct Segment
   {
-    std::size_t size;                                  
-    std::vector<Word> words = std::vector<Word>(1024); 
+    std::size_t size;
+    std::vector<Word> words = std::vector<Word>(1024);
   };
 
-  static constexpr uint64_t FIRST = 1UL << 32;
+  static constexpr uint64_t kFIRST = 1UL << 32;
+  static constexpr uint32_t kADDR_MASK = 0x0000FFFF;
 
 public:
-  std::size_t align;        
-  std::vector<Segment> mem; 
-  std::atomic_uint gvc{0};  
+  std::size_t align;
+  std::vector<Segment> mem;
+
+  std::atomic_uint gvc{0};
   std::atomic_uint64_t segs{2};
 
   Region(std::size_t size, std::size_t align)
@@ -35,71 +37,63 @@ public:
 
   inline Word &word(uintptr_t addr)
   {
-    return mem[addr >> 32].words[(addr & 0x0000FFFF) / align];
+    return mem[addr >> 32].words[(addr & kADDR_MASK) / align];
   }
 
-  void UnlockWriteSet(Transaction *transaction) noexcept
+  bool LockWriteSet(Transaction &transaction) noexcept
   {
-    for (const auto &target_src : transaction->write_set) 
-    {
-      word(target_src.first).vlock.Release();
-    }
-  }
+    std::vector<std::reference_wrapper<Region::Word>> locked;
+    locked.reserve(transaction.write_set.size());
 
-  bool LockWriteSet(Transaction *transaction) noexcept
-  {
-    int locked = 0;
-    for (const auto &target_src : transaction->write_set)
+    for (const auto &entry : transaction.write_set)
     {
-      if (!word(target_src.first).vlock.TryAcquire())
+      auto w = word(entry.first);
+      if (!w.vlock.TryAcquire())
       {
-        UnlockWriteSet(locked, transaction);
+        for (const auto l : locked)
+        {
+          l.get().vlock.Release();
+        }
         return false;
       }
-      ++locked;
-    }
-
-    return true;
-  }
-
-  bool ValidateReadSet(Transaction *transaction) noexcept
-  {
-    for (const auto addr : transaction->read_set)
-    {
-      VersionLock::Value val = word(reinterpret_cast<uint64_t>(addr)).vlock.Sample();
-      if (val.locked || val.version > transaction->rv) 
+      else
       {
-        return false;
+        locked.push_back(w);
       }
     }
 
     return true;
   }
 
-  void Commit(Transaction *transaction) noexcept
+  void UnlockWriteSet(Transaction &transaction) noexcept
   {
-    for (const auto &target_src : transaction->write_set)
+    for (const auto &entry : transaction.write_set)
     {
-      Region::Word &wl = word(target_src.first);
-      memcpy(&wl.word, target_src.second.get(), align);
-      wl.vlock.VersionedRelease(transaction->wv);
+      word(entry.first).vlock.Release();
     }
   }
 
-private:
-  void UnlockWriteSet(int locked, Transaction *transaction) noexcept
+  bool ValidateReadSet(Transaction &transaction) noexcept
   {
-    if (locked == 0) 
+    for (const auto addr : transaction.read_set)
     {
-      return;
+      VersionLock::Value val = word(addr).vlock.Sample();
+      if (val.version > transaction.rv || val.locked)
+      {
+        return false;
+      }
     }
 
-    for (const auto &target_src : transaction->write_set)
-    {
-      locked--;
-      word(target_src.first).vlock.Release();
-      if (locked == 0) break;
-    }
+    return true;
+  }
 
+  void Commit(Transaction &transaction) noexcept
+  {
+    for (const auto &entry : transaction.write_set)
+    {
+      Region::Word &wl = word(entry.first);
+      memcpy(&wl.word, entry.second.get(), align);
+      wl.vlock.VersionedRelease(transaction.wv);
+    }
   }
 };
