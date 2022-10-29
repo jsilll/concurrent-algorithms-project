@@ -1,8 +1,10 @@
 #pragma once
 
+#include <mutex>
 #include <atomic>
 #include <vector>
 #include <cstdint>
+#include <iostream>
 
 #include "transaction.hpp"
 #include "versioned_lock.hpp"
@@ -12,7 +14,8 @@ class Region
 public:
   struct Word
   {
-    std::uint64_t data; // TODO: change this to std::unique_ptr<char[]>
+    // TODO: change this to std::unique_ptr<char[]>
+    std::uint64_t data;
     VersionedLock lock;
   };
 
@@ -21,24 +24,35 @@ public:
     std::size_t size;
     std::vector<Word> words;
 
-    Segment(std::size_t size) : size(size), words(std::vector<Word>(size)) {}
+    Segment(std::size_t size) noexcept : size(size), words(size) {}
   };
 
-  static constexpr std::uintptr_t kFIRST = 1UL << 32;
-  static constexpr std::uintptr_t kADDR_MASK = 0x000000000000FFFF;
+public:
+  static constexpr std::uint64_t FIRST{0};
 
 public:
-  std::atomic_uint gvc{0};
+  std::atomic_uint32_t gvc{0};
   std::atomic_uint32_t segs{1};
-
+  
   std::size_t align;
+  std::mutex mem_mutex;
   std::vector<Segment> mem;
 
-  Region(std::size_t size, std::size_t align) : align(align) { mem.reserve(512); }
-
-  inline Word &word(uintptr_t addr) noexcept
+  Region(std::size_t size, std::size_t align) noexcept : align(align)
   {
-    return mem[addr >> 32].words[(addr & kADDR_MASK) / align];
+    // mem.reserve(512);
+    mem.emplace_back(size);
+  }
+
+  inline Word &word(std::uintptr_t addr) noexcept
+  {
+    return mem[addr >> 32].words[(addr & 0x0000FFFF) / align];
+  }
+
+  inline std::uintptr_t Alloc(std::size_t size)
+  {
+    mem.emplace_back(size);
+    return static_cast<std::uintptr_t>(segs.fetch_add(1)) << 32;
   }
 
   bool LockWriteSet(Transaction &transaction) noexcept
@@ -49,7 +63,11 @@ public:
     for (const auto &entry : transaction.write_set)
     {
       Region::Word &w = word(entry.first);
-      if (!w.lock.TryLock(transaction.rv))
+      if (w.lock.TryLock(transaction.rv))
+      {
+        locked.push_back(w);
+      }
+      else
       {
         for (const auto l : locked)
         {
@@ -57,10 +75,6 @@ public:
         }
 
         return false;
-      }
-      else
-      {
-        locked.push_back(w);
       }
     }
 
@@ -80,7 +94,7 @@ public:
     for (const auto addr : transaction.read_set)
     {
       VersionedLock::TimeStamp ts = word(addr).lock.Sample();
-      if (ts.version > transaction.rv || ts.locked)
+      if (ts.locked || ts.version > transaction.rv)
       {
         return false;
       }
@@ -93,9 +107,9 @@ public:
   {
     for (const auto &entry : transaction.write_set)
     {
-      Region::Word &wl = word(entry.first);
-      memcpy(&wl.data, entry.second.get(), align);
-      wl.lock.Unlock(transaction.wv);
+      Region::Word &w = word(entry.first);
+      memcpy(&w.data, entry.second.get(), align);
+      w.lock.Unlock(transaction.wv);
     }
   }
 };
