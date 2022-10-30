@@ -21,35 +21,51 @@ private:
 public:
   TimeStamp Sample() const noexcept
   {
-    auto val = counter.load();
-    return TimeStamp{static_cast<bool>(val & LOCKED_MASK), val & VERSION_MASK};
+    auto current = counter.load();
+    return TimeStamp{IsLocked(current), Version(current)};
   }
 
   bool Validate(std::uint32_t rv) noexcept
   {
     auto current = counter.load();
-    return !(current & LOCKED_MASK || (current & VERSION_MASK) > rv);
+    return !(IsLocked(current) || Version(current) > rv);
   }
 
   bool TryLock(std::uint32_t rv) noexcept
   {
     auto current = counter.load();
 
-    if (current & LOCKED_MASK || (current & VERSION_MASK) > rv)
+    if (IsLocked(current) || Version(current) > rv)
     {
       return false;
     }
 
-    return counter.compare_exchange_strong(current, current | LOCKED_MASK);
+    return counter.compare_exchange_strong(current, Lock(current));
   }
 
   void Unlock() noexcept
   {
-    counter.store(counter.load() & VERSION_MASK);
+    counter.store(Version(counter.load()));
   }
 
   void Unlock(std::uint64_t wv) noexcept
   {
     counter.store(wv);
+  }
+
+private:
+  static inline std::uint64_t Lock(std::uint64_t val) noexcept
+  {
+    return val | LOCKED_MASK;
+  }
+
+  static inline bool IsLocked(std::uint64_t val) noexcept
+  {
+    return val & LOCKED_MASK;
+  }
+
+  static inline std::uint64_t Version(std::uint64_t val) noexcept
+  {
+    return val & VERSION_MASK;
   }
 };

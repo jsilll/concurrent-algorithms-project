@@ -52,7 +52,7 @@ typedef struct segment_node* segment_list;
 /**
  * @brief Simple Shared Memory Region (a.k.a Transactional Memory).
  */
-struct region {
+struct Region {
     struct shared_lock_t lock; // Global (coarse-grained) lock
     void* start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
     segment_list allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
@@ -61,7 +61,7 @@ struct region {
 };
 
 shared_t tm_create(size_t size, size_t align) {
-    struct region* region = (struct region*) malloc(sizeof(struct region));
+    struct Region* region = (struct Region*) malloc(sizeof(struct Region));
     if (unlikely(!region)) {
         return invalid_shared;
     }
@@ -87,7 +87,7 @@ void tm_destroy(shared_t shared) {
     // Note: To be compatible with any implementation, shared_t is defined as a
     // void*. For this particular implementation, the "real" type of a shared_t
     // is a struct region*.
-    struct region* region = (struct region*) shared;
+    struct Region* region = (struct Region*) shared;
     while (region->allocs) { // Free allocated segments
         segment_list tail = region->allocs->next;
         free(region->allocs);
@@ -110,15 +110,15 @@ void tm_destroy(shared_t shared) {
 // You can assume sizeof(void*) == 64b and that the maximum size ever allocated
 // will be 2^48.
 void* tm_start(shared_t shared) {
-    return ((struct region*) shared)->start;
+    return ((struct Region*) shared)->start;
 }
 
 size_t tm_size(shared_t shared) {
-    return ((struct region*) shared)->size;
+    return ((struct Region*) shared)->size;
 }
 
 size_t tm_align(shared_t shared) {
-    return ((struct region*) shared)->align;
+    return ((struct Region*) shared)->align;
 }
 
 tx_t tm_begin(shared_t shared, bool is_ro) {
@@ -132,11 +132,11 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
         // and to optimize the code with this additional knowledge.
         // It of course penalizes executions in which the condition turns up to
         // be true.
-        if (unlikely(!shared_lock_acquire_shared(&(((struct region*) shared)->lock))))
+        if (unlikely(!shared_lock_acquire_shared(&(((struct Region*) shared)->lock))))
             return invalid_tx;
         return read_only_tx;
     } else {
-        if (unlikely(!shared_lock_acquire(&(((struct region*) shared)->lock))))
+        if (unlikely(!shared_lock_acquire(&(((struct Region*) shared)->lock))))
             return invalid_tx;
         return read_write_tx;
     }
@@ -144,9 +144,9 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
 
 bool tm_end(shared_t shared, tx_t tx) {
     if (tx == read_only_tx) {
-        shared_lock_release_shared(&(((struct region*) shared)->lock));
+        shared_lock_release_shared(&(((struct Region*) shared)->lock));
     } else {
-        shared_lock_release(&(((struct region*) shared)->lock));
+        shared_lock_release(&(((struct Region*) shared)->lock));
     }
     return true;
 }
@@ -166,7 +166,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // We allocate the dynamic segment such that its words are correctly
     // aligned. Moreover, the alignment of the 'next' and 'prev' pointers must
     // be satisfied. Thus, we use align on max(align, struct segment_node*).
-    size_t align = ((struct region*) shared)->align;
+    size_t align = ((struct Region*) shared)->align;
     align = align < sizeof(struct segment_node*) ? sizeof(void*) : align;
 
     struct segment_node* sn;
@@ -175,9 +175,9 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 
     // Insert in the linked list
     sn->prev = NULL;
-    sn->next = ((struct region*) shared)->allocs;
+    sn->next = ((struct Region*) shared)->allocs;
     if (sn->next) sn->next->prev = sn;
-    ((struct region*) shared)->allocs = sn;
+    ((struct Region*) shared)->allocs = sn;
 
     void* segment = (void*) ((uintptr_t) sn + sizeof(struct segment_node));
     memset(segment, 0, size);
@@ -190,7 +190,7 @@ bool tm_free(shared_t shared, tx_t unused(tx), void* segment) {
 
     // Remove from the linked list
     if (sn->prev) sn->prev->next = sn->next;
-    else ((struct region*) shared)->allocs = sn->next;
+    else ((struct Region*) shared)->allocs = sn->next;
     if (sn->next) sn->next->prev = sn->prev;
 
     free(sn);

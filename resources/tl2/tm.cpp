@@ -10,7 +10,6 @@
 #include <unordered_set>
 
 #include "expect.hpp"
-#include "region.hpp"
 #include "transaction.hpp"
 #include "versioned_lock.hpp"
 
@@ -57,14 +56,16 @@ bool tm_write(shared_t shared, tx_t tx, void const *source, std::size_t size, vo
   auto transaction = reinterpret_cast<Transaction *>(tx);
 
   auto source_word_base = reinterpret_cast<std::uintptr_t>(source);
-  auto target_word_base = reinterpret_cast<std::uintptr_t>(target);
 
-  for (std::size_t offset = 0; offset < size; offset += region->align)
+  std::size_t baddr = reinterpret_cast<std::uintptr_t>(target) >> 32;
+  std::size_t boffset = reinterpret_cast<std::uintptr_t>(target) & 0x0000FFFF;
+
+  for (std::size_t offset = boffset; offset < size / region->align; ++offset)
   {
-    std::uintptr_t target_word = target_word_base + offset;
+    Region::Word &word = region->mem[baddr].words[offset];
     auto source_word = reinterpret_cast<void *>(source_word_base + offset);
-    transaction->write_set[target_word] = std::make_unique<char[]>(region->align);
-    memcpy(transaction->write_set[target_word].get(), source_word, region->align);
+    transaction->write_set[&word] = std::make_unique<char[]>(region->align);
+    memcpy(transaction->write_set[&word].get(), source_word, region->align);
   }
 
   return true;
@@ -75,13 +76,14 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
   auto region = static_cast<Region *>(shared);
   auto transaction = reinterpret_cast<Transaction *>(tx);
 
+  std::size_t baddr = reinterpret_cast<std::uintptr_t>(source) >> 32;
+  std::size_t boffset = reinterpret_cast<std::uintptr_t>(source) & 0x0000FFFF;
+
   if (transaction->ro)
   {
-    for (std::size_t offset = 0; offset < size; offset += region->align)
+    for (std::size_t offset = boffset; offset < size / region->align; ++offset)
     {
-      std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(source) + offset;
-
-      Region::Word &word = region->word(addr);
+      Region::Word &word = region->mem[baddr].words[offset];
       void *target_addr = reinterpret_cast<void *>(reinterpret_cast<std::uintptr_t>(target) + offset);
 
       VersionedLock::TimeStamp ts = word.lock.Sample();
@@ -98,15 +100,14 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
   }
   else
   {
-    for (std::size_t offset = 0; offset < size; offset += region->align)
+    for (std::size_t offset = boffset; offset < size / region->align; ++offset)
     {
-      std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(source) + offset;
-      transaction->read_set.emplace(addr);
+      Region::Word &word = region->mem[baddr].words[offset];
 
-      Region::Word &word = region->word(addr);
+      transaction->read_set.emplace(&word);
+
+      auto entry = transaction->write_set.find(&word);
       void *target_addr = reinterpret_cast<void *>(reinterpret_cast<std::uintptr_t>(target) + offset);
-
-      auto entry = transaction->write_set.find(addr);
       if (entry != transaction->write_set.end())
       {
         memcpy(target_addr, entry->second.get(), region->align);
@@ -138,6 +139,9 @@ bool tm_end(shared_t shared, tx_t tx) noexcept
   if (transaction->ro)
   {
     delete transaction;
+    // cout_mutex.lock();
+    // std::cout << "commited\n";
+    // cout_mutex.unlock();
     return true;
   }
 
@@ -151,8 +155,11 @@ bool tm_end(shared_t shared, tx_t tx) noexcept
 
   if (transaction->rv + 1 == transaction->wv)
   {
-    region->Commit(*transaction); 
+    region->Commit(*transaction);
     delete transaction;
+    // cout_mutex.lock();
+    // std::cout << "commited\n";
+    // cout_mutex.unlock();
     return true;
   }
 
@@ -165,6 +172,9 @@ bool tm_end(shared_t shared, tx_t tx) noexcept
 
   region->Commit(*transaction);
   delete transaction;
+  // cout_mutex.lock();
+  // std::cout << "commited\n";
+  // cout_mutex.unlock();
   return true;
 }
 

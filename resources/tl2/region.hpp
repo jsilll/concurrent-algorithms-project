@@ -4,10 +4,14 @@
 #include <atomic>
 #include <vector>
 #include <cstdint>
-#include <iostream>
+
+// #include <mutex>
+// #include <iostream>
 
 #include "transaction.hpp"
 #include "versioned_lock.hpp"
+
+// std::mutex cout_mutex;
 
 class Region
 {
@@ -33,12 +37,12 @@ public:
 public:
   std::atomic_uint32_t gvc{0};
   std::atomic_uint32_t segs{1};
-  
+
   std::size_t align;
   std::mutex mem_mutex;
   std::vector<Segment> mem;
 
-  Region(std::size_t size, std::size_t align) noexcept : align(align)
+  Region(std::size_t size, std::size_t align) noexcept : align(align), mem()
   {
     // mem.reserve(512);
     mem.emplace_back(size);
@@ -46,6 +50,9 @@ public:
 
   inline Word &word(std::uintptr_t addr) noexcept
   {
+    // cout_mutex.lock();
+    // std::cout << (addr >> 32) << "/" << mem.size() << " " << (addr & 0x0000FFFF) / align << "/" << mem[addr >> 32].words.size() << "\n";
+    // cout_mutex.unlock();
     return mem[addr >> 32].words[(addr & 0x0000FFFF) / align];
   }
 
