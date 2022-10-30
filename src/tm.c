@@ -410,48 +410,50 @@ tx_t tm_begin(shared_t shared, bool is_ro)
     if (is_ro)
     {
         unsigned long ticket = atomic_fetch_add_explicit(&(region->batcher.take), 1ul, memory_order_relaxed);
-        while (atomic_load_explicit(&(region->batcher.pass), memory_order_relaxed) != ticket) 
-        {
+
+        while (atomic_load_explicit(&(region->batcher.pass), memory_order_relaxed) != ticket)
             short_pause();
-        }
 
         atomic_thread_fence(memory_order_acquire);
+
         atomic_fetch_add_explicit(&(region->batcher.nb_entered), 1ul, memory_order_relaxed);
+
         atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
+
         return read_only_tx;
     }
-
-    while (true)
+    else
     {
-        unsigned long ticket = atomic_fetch_add_explicit(&(region->batcher.take), 1ul, memory_order_relaxed);
-        while (atomic_load_explicit(&(region->batcher.pass), memory_order_relaxed) != ticket) 
+        while (true)
         {
-            short_pause();
-        }
-
-        atomic_thread_fence(memory_order_acquire);
-        if (atomic_load_explicit(&(region->batcher.counter), memory_order_relaxed) == 0)
-        {
-            unsigned long int epoch = atomic_load_explicit(&(region->batcher.epoch), memory_order_relaxed);
-            atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
-            while (atomic_load_explicit(&(region->batcher.epoch), memory_order_relaxed) == epoch) 
-            {
+            unsigned long ticket = atomic_fetch_add_explicit(&(region->batcher.take), 1ul, memory_order_relaxed);
+            while (atomic_load_explicit(&(region->batcher.pass), memory_order_relaxed) != ticket)
                 short_pause();
-            }
             atomic_thread_fence(memory_order_acquire);
-        }
-        else
-        {
-            atomic_fetch_add_explicit(&(region->batcher.counter), -1ul, memory_order_release);
-            break;
-        }
-    }
 
-    atomic_fetch_add_explicit(&(region->batcher.nb_entered), 1ul, memory_order_relaxed);
-    atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
-    tx_t tx = atomic_fetch_add_explicit(&(region->batcher.nb_write_tx), 1ul, memory_order_relaxed) + 1ul;
-    atomic_thread_fence(memory_order_release);
-    return tx;
+            if (atomic_load_explicit(&(region->batcher.counter), memory_order_relaxed) == 0)
+            {
+                unsigned long int epoch = atomic_load_explicit(&(region->batcher.epoch), memory_order_relaxed);
+                atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
+
+                while (atomic_load_explicit(&(region->batcher.epoch), memory_order_relaxed) == epoch)
+                    short_pause();
+                atomic_thread_fence(memory_order_acquire);
+            }
+            else
+            {
+                atomic_fetch_add_explicit(&(region->batcher.counter), -1ul, memory_order_release);
+                break;
+            }
+        }
+        atomic_fetch_add_explicit(&(region->batcher.nb_entered), 1ul, memory_order_relaxed);
+        atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
+
+        tx_t tx = atomic_fetch_add_explicit(&(region->batcher.nb_write_tx), 1ul, memory_order_relaxed) + 1ul;
+        atomic_thread_fence(memory_order_release);
+
+        return tx;
+    }
 }
 
 bool tm_end(shared_t shared, tx_t tx)
