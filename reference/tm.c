@@ -36,7 +36,7 @@
 #include "macros.h"
 #include "shared-lock.h"
 
-static const tx_t read_only_tx  = UINTPTR_MAX - 10;
+static const tx_t READ_ONLY_TX  = UINTPTR_MAX - 10;
 static const tx_t read_write_tx = UINTPTR_MAX - 11;
 
 /**
@@ -134,7 +134,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
         // be true.
         if (unlikely(!shared_lock_acquire_shared(&(((struct Region*) shared)->lock))))
             return invalid_tx;
-        return read_only_tx;
+        return READ_ONLY_TX;
     } else {
         if (unlikely(!shared_lock_acquire(&(((struct Region*) shared)->lock))))
             return invalid_tx;
@@ -143,7 +143,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
 }
 
 bool tm_end(shared_t shared, tx_t tx) {
-    if (tx == read_only_tx) {
+    if (tx == READ_ONLY_TX) {
         shared_lock_release_shared(&(((struct Region*) shared)->lock));
     } else {
         shared_lock_release(&(((struct Region*) shared)->lock));

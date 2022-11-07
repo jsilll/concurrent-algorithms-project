@@ -65,8 +65,8 @@
 #define BATCHER_NB_TX 12UL
 #define MULTIPLE_READERS UINTPTR_MAX - BATCHER_NB_TX
 
-static const tx_t destroy_tx = UINTPTR_MAX - 2UL;
-static const tx_t read_only_tx = UINTPTR_MAX - 1UL;
+static const tx_t DESTROY_TX = UINTPTR_MAX - 2UL;
+static const tx_t READ_ONLY_TX = UINTPTR_MAX - 1UL;
 
 // -------------------------------------------------------------------------- //
 
@@ -116,7 +116,7 @@ static inline void short_pause()
 
 // -------------------------------------------------------------------------- //
 
-void BathCommit(Region *region)
+void Commit(Region *region)
 {
     atomic_thread_fence(memory_order_acquire);
 
@@ -124,7 +124,7 @@ void BathCommit(Region *region)
     {
         MappingEntry *mapping = region->mapping + i;
 
-        if (mapping->status_owner == destroy_tx ||
+        if (mapping->status_owner == DESTROY_TX ||
             (mapping->status_owner != 0 && (mapping->status == REMOVED_FLAG || mapping->status == ADDED_REMOVED_FLAG)))
         {
             // Free this block
@@ -138,7 +138,7 @@ void BathCommit(Region *region)
             }
             else
             {
-                mapping->status_owner = destroy_tx;
+                mapping->status_owner = DESTROY_TX;
                 mapping->status = DEFAULT_FLAG;
             }
         }
@@ -171,7 +171,7 @@ void Leave(Batcher *batcher, Region *region, tx_t tx)
     {
         if (atomic_load_explicit(&(batcher->nb_write_tx), memory_order_relaxed) > 0)
         {
-            BathCommit(region);
+            Commit(region);
             atomic_store_explicit(&(batcher->nb_write_tx), 0, memory_order_relaxed);
             atomic_store_explicit(&(batcher->counter), BATCHER_NB_TX, memory_order_relaxed);
             atomic_fetch_add_explicit(&(batcher->epoch), 1ul, memory_order_relaxed);
@@ -179,7 +179,7 @@ void Leave(Batcher *batcher, Region *region, tx_t tx)
 
         atomic_fetch_add_explicit(&(batcher->pass), 1ul, memory_order_release);
     }
-    else if (tx != read_only_tx)
+    else if (tx != READ_ONLY_TX)
     {
         unsigned long int epoch = atomic_load_explicit(&(batcher->epoch), memory_order_relaxed);
         atomic_fetch_add_explicit(&(batcher->pass), 1ul, memory_order_release);
@@ -197,7 +197,7 @@ MappingEntry *GetSegment(Region *region, const void *source)
 {
     for (size_t i = 0; i < region->index; ++i)
     {
-        if (unlikely(region->mapping[i].status_owner == destroy_tx))
+        if (unlikely(region->mapping[i].status_owner == DESTROY_TX))
         {
             return NULL;
         }
@@ -221,9 +221,9 @@ void Rollback(Region *region, tx_t tx)
         tx_t owner = mapping->status_owner;
         if (owner == tx && (mapping->status == ADDED_FLAG || mapping->status == ADDED_REMOVED_FLAG))
         {
-            mapping->status_owner = destroy_tx;
+            mapping->status_owner = DESTROY_TX;
         }
-        else if (likely(owner != destroy_tx && mapping->ptr != NULL))
+        else if (likely(owner != DESTROY_TX && mapping->ptr != NULL))
         {
             if (owner == tx)
             {
@@ -420,7 +420,7 @@ tx_t tm_begin(shared_t shared, bool is_ro)
 
         atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
 
-        return read_only_tx;
+        return READ_ONLY_TX;
     }
     else
     {
@@ -464,7 +464,7 @@ bool tm_end(shared_t shared, tx_t tx)
 
 bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *target)
 {
-    if (likely(tx == read_only_tx))
+    if (likely(tx == READ_ONLY_TX))
     {
         // Read the data
         memcpy(target, source, size);
