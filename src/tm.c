@@ -88,6 +88,13 @@ typedef struct
 
 // -------------------------------------------------------------------------- //
 
+/**
+ * @brief Gets the Segment Ptr
+ * 
+ * @param region 
+ * @param source 
+ * @return Segment* 
+ */
 static inline Segment *GetSegment(Region *region, const void *source)
 {
     // This function returns the
@@ -108,6 +115,12 @@ static inline Segment *GetSegment(Region *region, const void *source)
     return NULL;
 }
 
+/**
+ * @brief Leaves the Transaction
+ * 
+ * @param region 
+ * @param tx 
+ */
 static inline void Leave(Region *region, tx_t tx)
 {
     unsigned long attempt = atomic_fetch_add_explicit(&(region->batcher.lock), 1, memory_order_relaxed);
@@ -181,6 +194,12 @@ static inline void Leave(Region *region, tx_t tx)
     }
 }
 
+/**
+ * @brief Rollbacks the Transaction
+ * 
+ * @param region 
+ * @param tx 
+ */
 static inline void Rollback(Region *region, tx_t tx)
 {
     unsigned long int index = region->index;
@@ -222,6 +241,17 @@ static inline void Rollback(Region *region, tx_t tx)
     Leave(region, tx);
 }
 
+/**
+ * @brief Locks the words for a given transaction
+ * 
+ * @param region 
+ * @param tx 
+ * @param segment 
+ * @param target 
+ * @param size 
+ * @return true 
+ * @return false 
+ */
 static inline bool LockWords(Region *region, tx_t tx, Segment *segment, void *target, size_t size)
 {
     size_t index = ((char *)target - (char *)segment->data) / region->align;
