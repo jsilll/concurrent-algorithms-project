@@ -74,7 +74,7 @@ enum Status
 #define MULTIPLE_READERS UINTPTR_MAX - BATCHER_NB_TX
 
 static const tx_t READ_ONLY_TX = UINTPTR_MAX - 1;
-static const tx_t DESTROY_TX = UINTPTR_MAX - 2;
+static const tx_t REMOVE_SCHEDULED = UINTPTR_MAX - 2;
 
 // -------------------------------------------------------------------------- //
 
@@ -168,7 +168,7 @@ void batch_commit(Region *region)
     {
         Segment *mapping = region->segment + i;
 
-        if (mapping->status_owner == DESTROY_TX ||
+        if (mapping->status_owner == REMOVE_SCHEDULED ||
             (mapping->status_owner != 0 && (mapping->status == REMOVED_FLAG || mapping->status == ADDED_REMOVED_FLAG)))
         {
             // Free this block
@@ -182,7 +182,7 @@ void batch_commit(Region *region)
             }
             else
             {
-                mapping->status_owner = DESTROY_TX;
+                mapping->status_owner = REMOVE_SCHEDULED;
                 mapping->status = DEFAULT_FLAG;
             }
         }
@@ -241,7 +241,7 @@ Segment *get_segment(Region *region, const void *source)
 {
     for (std::size_t i = 0; i < region->index; ++i)
     {
-        if (unlikely(region->segment[i].status_owner == DESTROY_TX))
+        if (unlikely(region->segment[i].status_owner == REMOVE_SCHEDULED))
         {
             // printf("get_segment NULL\n");
             return nullptr;
@@ -346,9 +346,9 @@ void tm_rollback(Region *region, tx_t tx)
         tx_t owner = mapping->status_owner;
         if (owner == tx && (mapping->status == ADDED_FLAG || mapping->status == ADDED_REMOVED_FLAG))
         {
-            mapping->status_owner = DESTROY_TX;
+            mapping->status_owner = REMOVE_SCHEDULED;
         }
-        else if (likely(owner != DESTROY_TX && mapping->data != NULL))
+        else if (likely(owner != REMOVE_SCHEDULED && mapping->data != NULL))
         {
             if (owner == tx)
             {

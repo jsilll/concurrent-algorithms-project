@@ -65,7 +65,7 @@
 #define BATCHER_NB_TX 12UL
 #define MULTIPLE_READERS UINTPTR_MAX - BATCHER_NB_TX
 
-static const tx_t DESTROY_TX = UINTPTR_MAX - 2UL;
+static const tx_t DESTROY_SCHEDULED = UINTPTR_MAX - 2UL;
 static const tx_t READ_ONLY_TX = UINTPTR_MAX - 1UL;
 
 // -------------------------------------------------------------------------- //
@@ -84,8 +84,8 @@ typedef struct
     atomic_ulong take;
     atomic_ulong epoch;
     atomic_ulong counter;
-    atomic_ulong nb_entered;
-    atomic_ulong nb_write_tx;
+    atomic_ulong n_tx_entered;
+    atomic_ulong n_write_tx_entered;
 } Batcher;
 
 typedef struct
@@ -124,7 +124,7 @@ void Commit(Region *region)
     {
         MappingEntry *mapping = region->mapping + i;
 
-        if (mapping->status_owner == DESTROY_TX ||
+        if (mapping->status_owner == DESTROY_SCHEDULED ||
             (mapping->status_owner != 0 && (mapping->status == REMOVED_FLAG || mapping->status == ADDED_REMOVED_FLAG)))
         {
             // Free this block
@@ -138,7 +138,7 @@ void Commit(Region *region)
             }
             else
             {
-                mapping->status_owner = DESTROY_TX;
+                mapping->status_owner = DESTROY_SCHEDULED;
                 mapping->status = DEFAULT_FLAG;
             }
         }
@@ -197,7 +197,7 @@ MappingEntry *GetSegment(Region *region, const void *source)
 {
     for (size_t i = 0; i < region->index; ++i)
     {
-        if (unlikely(region->mapping[i].status_owner == DESTROY_TX))
+        if (unlikely(region->mapping[i].status_owner == DESTROY_SCHEDULED))
         {
             return NULL;
         }
@@ -221,9 +221,9 @@ void Rollback(Region *region, tx_t tx)
         tx_t owner = mapping->status_owner;
         if (owner == tx && (mapping->status == ADDED_FLAG || mapping->status == ADDED_REMOVED_FLAG))
         {
-            mapping->status_owner = DESTROY_TX;
+            mapping->status_owner = DESTROY_SCHEDULED;
         }
-        else if (likely(owner != DESTROY_TX && mapping->ptr != NULL))
+        else if (likely(owner != DESTROY_SCHEDULED && mapping->ptr != NULL))
         {
             if (owner == tx)
             {
