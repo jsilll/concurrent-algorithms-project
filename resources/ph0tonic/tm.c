@@ -66,7 +66,7 @@
 #define MULTIPLE_READERS UINTPTR_MAX - BATCHER_NB_TX
 
 static const tx_t DESTROY_SCHEDULED = UINTPTR_MAX - 2UL;
-static const tx_t READ_ONLY_TX = UINTPTR_MAX - 1UL;
+static const tx_t RO_TX = UINTPTR_MAX - 1UL;
 
 // -------------------------------------------------------------------------- //
 
@@ -179,7 +179,7 @@ void Leave(Batcher *batcher, Region *region, tx_t tx)
 
         atomic_fetch_add_explicit(&(batcher->pass), 1ul, memory_order_release);
     }
-    else if (tx != READ_ONLY_TX)
+    else if (tx != RO_TX)
     {
         unsigned long int epoch = atomic_load_explicit(&(batcher->epoch), memory_order_relaxed);
         atomic_fetch_add_explicit(&(batcher->pass), 1ul, memory_order_release);
@@ -420,7 +420,7 @@ tx_t tm_begin(shared_t shared, bool is_ro)
 
         atomic_fetch_add_explicit(&(region->batcher.pass), 1ul, memory_order_release);
 
-        return READ_ONLY_TX;
+        return RO_TX;
     }
     else
     {
@@ -464,7 +464,7 @@ bool tm_end(shared_t shared, tx_t tx)
 
 bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *target)
 {
-    if (likely(tx == READ_ONLY_TX))
+    if (likely(tx == RO_TX))
     {
         // Read the data
         memcpy(target, source, size);

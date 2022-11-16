@@ -73,8 +73,8 @@ enum Status
 #define BATCHER_NB_TX 12
 #define MULTIPLE_READERS UINTPTR_MAX - BATCHER_NB_TX
 
-static const tx_t READ_ONLY_TX = UINTPTR_MAX - 1;
-static const tx_t REMOVE_SCHEDULED = UINTPTR_MAX - 2;
+static const tx_t RO_TX = UINTPTR_MAX - 1;
+static const tx_t RM_SCHED = UINTPTR_MAX - 2;
 
 // -------------------------------------------------------------------------- //
 
@@ -123,7 +123,7 @@ tx_t enter(Batcher *batcher, bool is_ro)
         batcher->pass.fetch_add(1, std::memory_order_release);
 
         // printf("enter read\n");
-        return READ_ONLY_TX;
+        return RO_TX;
     }
     else
     {
@@ -168,7 +168,7 @@ void batch_commit(Region *region)
     {
         Segment *mapping = region->segment + i;
 
-        if (mapping->status_owner == REMOVE_SCHEDULED ||
+        if (mapping->status_owner == RM_SCHED ||
             (mapping->status_owner != 0 && (mapping->status == REMOVED_FLAG || mapping->status == ADDED_REMOVED_FLAG)))
         {
             // Free this block
@@ -182,7 +182,7 @@ void batch_commit(Region *region)
             }
             else
             {
-                mapping->status_owner = REMOVE_SCHEDULED;
+                mapping->status_owner = RM_SCHED;
                 mapping->status = DEFAULT_FLAG;
             }
         }
@@ -223,7 +223,7 @@ void leave(Batcher *batcher, Region *region, tx_t tx)
         }
         batcher->pass.fetch_add(1, std::memory_order_release);
     }
-    else if (tx != READ_ONLY_TX)
+    else if (tx != RO_TX)
     {
         unsigned long int epoch = atomic_load_explicit(&(batcher->epoch), std::memory_order_relaxed);
         batcher->pass.fetch_add(1, std::memory_order_release);
@@ -241,7 +241,7 @@ Segment *get_segment(Region *region, const void *source)
 {
     for (std::size_t i = 0; i < region->index; ++i)
     {
-        if (unlikely(region->segment[i].status_owner == REMOVE_SCHEDULED))
+        if (unlikely(region->segment[i].status_owner == RM_SCHED))
         {
             // printf("get_segment NULL\n");
             return nullptr;
@@ -346,9 +346,9 @@ void tm_rollback(Region *region, tx_t tx)
         tx_t owner = mapping->status_owner;
         if (owner == tx && (mapping->status == ADDED_FLAG || mapping->status == ADDED_REMOVED_FLAG))
         {
-            mapping->status_owner = REMOVE_SCHEDULED;
+            mapping->status_owner = RM_SCHED;
         }
-        else if (likely(owner != REMOVE_SCHEDULED && mapping->data != NULL))
+        else if (likely(owner != RM_SCHED && mapping->data != NULL))
         {
             if (owner == tx)
             {
@@ -461,7 +461,7 @@ bool tm_read_write(shared_t shared, tx_t tx, void const *source, size_t size, vo
 
 bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *target)
 {
-    if (likely(tx == READ_ONLY_TX))
+    if (likely(tx == RO_TX))
     {
         // Read the data
         memcpy(target, source, size);
