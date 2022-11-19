@@ -12,16 +12,16 @@ typedef _Atomic(tx_t) atomic_tx;
 typedef enum _SegmentStatus
 {
   /// @brief Used when segment
-  /// has been removed.
-  RM,
-  /// @brief Used when segment
   /// has been allocated.
   ADDED,
+  /// @brief Used when segment
+  /// has been removed.
+  REMOVED,
   /// @brief Default segment status.
   DEFAULT,
   /// @brief Used when segment has
   /// been added after being removed.
-  RM_N_ADDED,
+  ADDED_AFTER_REMOVE,
 } SegmentStatus;
 
 /// @brief Used for expressing the
@@ -31,13 +31,13 @@ typedef enum _SegmentOwner
 {
   /// @brief Used when segment
   /// has no current owner
-  NONE = 0,
+  NO_OWNER = 0,
   /// @brief Used when segment
   /// owner is a read only transaction.
-  RO_TX = UINTPTR_MAX - 1,
+  RO_OWNER = UINTPTR_MAX - 1,
   /// @brief Used when the segment
   /// is scheduled to be removed.
-  RM_SCHED = UINTPTR_MAX - 2,
+  RM_OWNER = UINTPTR_MAX - 2,
 } SegmentOwner;
 
 /// @brief Used for expressing
@@ -46,10 +46,7 @@ typedef enum _BatcherCounterStatus
 {
   /// @brief Maximum number of threads
   /// the batcher can handle at each epoch
-  N_TX = 12,
-  /// @brief Used when there's multiple readers
-  /// inside the batcher for the same epoch.
-  M_RO_TX = UINTPTR_MAX - 1,
+  MAX_WRITE_TX_PER_EPOCH = 12,
 } BatcherCounterStatus;
 
 /// @brief Represents a segment of memory in the STM.
@@ -62,10 +59,10 @@ typedef struct _Segment
   /// this segment (v1 and v2).
   size_t size;
   /// @brief Identifies the current 
-  /// owner of the segment.
+  /// owner of the segment. <---
   atomic_tx owner;
   /// @brief Stores whether this segment 
-  /// was added or removed in this epoch.
+  /// was added or removed in this epoch. <---
   atomic_int status;
 } Segment;
 
@@ -81,18 +78,18 @@ typedef struct _Batcher
   /// @brief Responsible for giving each
   /// transaction a unique identifier so
   /// that they know when its their turn.
-  atomic_ulong take;
+  atomic_ulong last_turn;
   /// @brief Stores the current batcher epoch.
-  atomic_ulong epoch;
+  atomic_ulong counter;
   /// @brief Number of transactions that 
-  /// entered in the batcher in the current epoch.
-  atomic_ulong n_tx_entered;
+  /// entered in the batcher in the current epoch. <---
+  atomic_ulong n_entered;
   /// @brief Number of transactions that still
-  /// can enter in the batcher
-  atomic_ulong remaining_slots;
+  /// can enter in the batcher <---
+  atomic_ulong n_write_slots;
   /// @brief Number of write transactions that
-  /// entered in the batcher in the current epoch.
-  atomic_ulong n_write_tx_entered;
+  /// entered in the batcher in the current epoch. <---
+  atomic_ulong n_write_entered;
 } Batcher;
 
 /// @brief Represents a region in the
