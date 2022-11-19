@@ -38,9 +38,9 @@ static inline tx_t Enter(Region *region, bool is_ro)
       relinquish_cpu();
     }
 
-    // We can proceed
     if (atomic_load(&(region->batcher.n_write_slots)) != 0)
     {
+      // We can proceed
       atomic_fetch_add(&(region->batcher.n_write_slots), -1);
       break;
     }
@@ -169,10 +169,10 @@ bool Lock(Region *region, Segment *segment, tx_t tx, void *target, size_t size)
 {
   // Beggining of the control words
   size_t base_index = ((char *)target - (char *)segment->data) / region->align;
-  
+
   // Getting the beggining of the controls words
   atomic_tx *controls = (atomic_tx *)((char *)segment->data + (segment->size << 1)) + base_index;
-  
+
   // For each requested word
   size_t max = size / region->align;
   for (size_t i = 0; i < max; ++i)
@@ -214,10 +214,10 @@ static inline void Undo(Region *region, tx_t tx)
         atomic_store(&(segment->owner), NO_OWNER);
         atomic_store(&(segment->status), DEFAULT);
       }
-      
+
       // Control words
       atomic_tx *controls = (atomic_tx *)((char *)segment->data + (segment->size << 1));
-      
+
       // For each word in the segment
       size_t max = segment->size / region->align;
       for (size_t j = 0; j < max; ++j)

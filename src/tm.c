@@ -24,17 +24,17 @@ shared_t tm_create(size_t size, size_t align)
   }
 
   // Initializing Region
-  region->index = 1;
   region->align = align;
   region->true_align = true_align;
+  atomic_store(&(region->index), 1);
 
   // Initializing region->batcher
-  region->batcher.turn = 0;
-  region->batcher.last_turn = 0;
-  region->batcher.counter = 0;
-  region->batcher.n_entered = 0;
-  region->batcher.n_write_entered = 0;
-  region->batcher.n_write_slots = MAX_WRITE_TX_PER_EPOCH;
+  atomic_store(&(region->batcher.turn), 0);
+  atomic_store(&(region->batcher.last_turn), 0);
+  atomic_store(&(region->batcher.counter), 0);
+  atomic_store(&(region->batcher.n_entered), 0);
+  atomic_store(&(region->batcher.n_write_entered), 0);
+  atomic_store(&(region->batcher.n_write_slots), MAX_WRITE_TX_PER_EPOCH);
 
   // Allocating space for region->segments
   region->segments = malloc(getpagesize());
@@ -46,9 +46,10 @@ shared_t tm_create(size_t size, size_t align)
 
   // Initializing region->segment
   memset(region->segments, 0, getpagesize());
+
   region->segments->size = size;
-  region->segments->owner = NO_OWNER;
-  region->segments->status = DEFAULT;
+  atomic_store(&(region->segments->status), DEFAULT);
+  atomic_store(&(region->segments->owner), NO_OWNER);
 
   // Allocating Space for region->segment->data
   size_t control_size = (size / true_align) * sizeof(tx_t);
@@ -221,12 +222,12 @@ alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void **target)
   Segment *segment = region->segments + index;
 
   // Initializing new segment
-  segment->owner = tx;
   segment->size = size;
-  segment->status = ADDED;
+  atomic_store(&(segment->owner), tx);
+  atomic_store(&(segment->status), ADDED);
 
   // Allocating memory for the segment's data + control
-  size_t control_size = size / region->align * sizeof(tx_t);
+  size_t control_size = segment->size / region->align * sizeof(tx_t);
   if (posix_memalign(&(segment->data), region->true_align, (size << 1) + control_size) != 0)
   {
     return nomem_alloc;
@@ -264,7 +265,8 @@ bool tm_free(shared_t shared, tx_t tx, void *seg)
   }
 
   // Signaling on segment status that the segment should be removed
-  segment->status = segment->status == ADDED ? ADDED_AFTER_REMOVE : REMOVED;
+  int previous_status = atomic_load(&(segment->status));
+  atomic_store(&(segment->status), previous_status == ADDED ? ADDED_AFTER_REMOVE : REMOVED);
 
   return true;
 }

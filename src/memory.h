@@ -46,7 +46,7 @@ typedef enum _BatcherCounterStatus
 {
   /// @brief Maximum number of threads
   /// the batcher can handle at each epoch
-  MAX_WRITE_TX_PER_EPOCH = 12,
+  MAX_WRITE_TX_PER_EPOCH = 16,
 } BatcherCounterStatus;
 
 /// @brief Represents a segment of memory in the STM.
@@ -82,13 +82,13 @@ typedef struct _Batcher
   /// @brief Stores the current batcher epoch.
   atomic_ulong counter;
   /// @brief Number of transactions that 
-  /// entered in the batcher in the current epoch. <---
+  /// entered in the batcher in the current epoch.
   atomic_ulong n_entered;
   /// @brief Number of transactions that still
-  /// can enter in the batcher <---
+  /// can enter in the batcher
   atomic_ulong n_write_slots;
   /// @brief Number of write transactions that
-  /// entered in the batcher in the current epoch. <---
+  /// entered in the batcher in the current epoch.
   atomic_ulong n_write_entered;
 } Batcher;
 
