@@ -15,7 +15,7 @@
  * @brief A lock that can be taken exclusively but also shared. Contrarily to
  * exclusive locks, shared locks do not have wait/wake_up capabilities.
  */
-struct shared_lock_t {
+struct _shared_lock_t {
     pthread_rwlock_t rwlock;
 };
 

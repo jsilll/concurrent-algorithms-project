@@ -12,7 +12,7 @@
  * The thread is moved to the end of the queue for its static
  * priority and a new thread gets to run.
  */
-static inline void relinquish_cpu()
+static inline void relinquish()
 {
 #if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
     _mm_pause();

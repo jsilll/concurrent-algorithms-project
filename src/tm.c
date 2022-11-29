@@ -5,7 +5,7 @@
 #endif
 
 #include "memory.h"
-#include "basic_operations.h"
+#include "internal_operations.h"
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
@@ -18,7 +18,7 @@ shared_t tm_create(size_t size, size_t align)
 
   // Allocating Memory for the region
   Region *region = malloc(sizeof(Region));
-  if (region == NULL)
+  if (unlikely(region == NULL))
   {
     return invalid_shared;
   }
@@ -29,16 +29,15 @@ shared_t tm_create(size_t size, size_t align)
   atomic_store(&(region->index), 1);
 
   // Initializing region->batcher
-  atomic_store(&(region->batcher.turn), 0);
-  atomic_store(&(region->batcher.last_turn), 0);
+  region->batcher.n_entered = 0;
+  lock_init(&(region->batcher.lock));
+  region->batcher.n_write_entered = 0;
   atomic_store(&(region->batcher.counter), 0);
-  atomic_store(&(region->batcher.n_entered), 0);
-  atomic_store(&(region->batcher.n_write_entered), 0);
-  atomic_store(&(region->batcher.n_write_slots), MAX_WRITE_TX_PER_EPOCH);
+  region->batcher.n_write_slots = MAX_WRITE_TX_PER_EPOCH;
 
   // Allocating space for region->segments
   region->segments = malloc(getpagesize());
-  if (region->segments == NULL)
+  if (unlikely(region->segments == NULL))
   {
     free(region);
     return invalid_shared;
@@ -53,7 +52,7 @@ shared_t tm_create(size_t size, size_t align)
 
   // Allocating Space for region->segment->data
   size_t control_size = (size / true_align) * sizeof(tx_t);
-  if (posix_memalign(&(region->segments->data), true_align, (size << 1) + control_size) != 0)
+  if (unlikely(posix_memalign(&(region->segments->data), true_align, (size << 1) + control_size) != 0))
   {
     free(region->segments);
     free(region);
@@ -187,7 +186,7 @@ bool tm_write(shared_t shared, tx_t tx, void const *source, size_t size, void *t
 
   // Looking up segment
   Segment *segment = LookupSegment(region, target);
-  if (segment == NULL)
+  if (unlikely(segment == NULL))
   {
     Undo(region, tx);
     return false;
@@ -228,7 +227,7 @@ alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void **target)
 
   // Allocating memory for the segment's data + control
   size_t control_size = segment->size / region->align * sizeof(tx_t);
-  if (posix_memalign(&(segment->data), region->true_align, (size << 1) + control_size) != 0)
+  if (unlikely(posix_memalign(&(segment->data), region->true_align, (size << 1) + control_size) != 0))
   {
     return nomem_alloc;
   }
@@ -267,6 +266,5 @@ bool tm_free(shared_t shared, tx_t tx, void *seg)
   // Signaling on segment status that the segment should be removed
   int previous_status = atomic_load(&(segment->status));
   atomic_store(&(segment->status), previous_status == ADDED ? ADDED_AFTER_REMOVE : REMOVED);
-
   return true;
 }

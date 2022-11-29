@@ -4,10 +4,12 @@
 #include <tm.h>
 #include <stdatomic.h>
 
+#include "lock.h"
+
 typedef _Atomic(tx_t) atomic_tx;
 
 /// @brief Used for expressing the
-/// status for a given segment in 
+/// status for a given segment in
 /// the transactional memory.
 typedef enum _SegmentStatus
 {
@@ -55,55 +57,55 @@ typedef struct _Segment
   /// @brief Points to the actual data
   /// [v1, v2, controls].
   void *data;
-  /// @brief Size of the data stored in 
+  /// @brief Size of the data stored in
   /// this segment (v1 and v2).
   size_t size;
-  /// @brief Identifies the current 
+  /// @brief Identifies the current
   /// owner of the segment. <---
   atomic_tx owner;
-  /// @brief Stores whether this segment 
+  /// @brief Stores whether this segment
   /// was added or removed in this epoch. <---
   atomic_int status;
 } Segment;
 
-/// @brief The goal of the Batcher is to artificially create 
-/// points in time in which no transaction is running. The 
-/// Batcher lets each and every blocked thread enter together 
+/// @brief The goal of the Batcher is to artificially create
+/// points in time in which no transaction is running. The
+/// Batcher lets each and every blocked thread enter together
 /// when the last thread (from the previous epoch) leaves.
 typedef struct _Batcher
 {
-  /// @brief Stores the which transaction
-  /// should be making changes now.
-  atomic_ulong turn;
-  /// @brief Responsible for giving each
-  /// transaction a unique identifier so
-  /// that they know when its their turn.
-  atomic_ulong last_turn;
+  /// @brief Batcher's lock for any transactions that
+  /// want to change on of its state variables
+  lock_t lock;
   /// @brief Stores the current batcher epoch.
+  /// this variable is atomic for the case when 
+  /// a transaction doesn't have to lock the 
+  /// whole batcher when it is waiting for the 
+  /// next epoch to start doens't 
   atomic_ulong counter;
-  /// @brief Number of transactions that 
+  /// @brief Number of transactions that
   /// entered in the batcher in the current epoch.
-  atomic_ulong n_entered;
-  /// @brief Number of transactions that still
+  unsigned long n_entered;
+  /// @brief Number of write transactions that still
   /// can enter in the batcher
-  atomic_ulong n_write_slots;
+  unsigned long n_write_slots;
   /// @brief Number of write transactions that
   /// entered in the batcher in the current epoch.
-  atomic_ulong n_write_entered;
+  unsigned long n_write_entered;
 } Batcher;
 
 /// @brief Represents a region in the
 /// software transactional memory
 typedef struct _Region
 {
-  /// @brief User requested alignment 
+  /// @brief User requested alignment
   /// of the memory segments (bytes)
   size_t align;
   /// @brief Batcher for this memory region
   Batcher batcher;
   /// @brief Array of segments in this memory region
   Segment *segments;
-  /// @brief True alignment of the memory 
+  /// @brief True alignment of the memory
   /// segments (bytes)
   size_t true_align;
   /// @brief Maximum index of any allocated

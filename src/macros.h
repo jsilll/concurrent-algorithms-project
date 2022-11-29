@@ -13,7 +13,7 @@
 #endif
 
 /**
- * @brief Define a proposition as likely false. 
+ * @brief Define a proposition as likely false.
  * @param prop Proposition
  */
 #undef unlikely

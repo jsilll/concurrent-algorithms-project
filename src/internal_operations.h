@@ -6,79 +6,75 @@
 #include <unistd.h>
 
 #include "macros.h"
-#include "memory.h"
-#include "relinquish_cpu.h"
+#include "relinquish.h"
+#include "internal_memory.h"
+
+static inline void LockBatcher(Batcher *batcher)
+{
+  lock_acquire(&(batcher->lock));
+}
+
+static inline void UnlockBatcher(Batcher *batcher)
+{
+  lock_release(&(batcher->lock));
+}
+
+static inline void WaitForNextBatcherEpoch(Batcher *batcher)
+{
+  unsigned long int last = atomic_load(&(batcher->counter));
+  while (last == atomic_load(&(batcher->counter)))
+  {
+    relinquish();
+  }
+}
 
 static inline tx_t Enter(Region *region, bool is_ro)
 {
   if (is_ro)
   {
-    // Waiting for our turn
-    unsigned long int turn = atomic_fetch_add(&(region->batcher.last_turn), 1);
-    while (turn != atomic_load(&(region->batcher.turn)))
-    {
-      relinquish_cpu();
-    }
+    LockBatcher(&(region->batcher));
 
     // Incrementing number of transactions that entered in batcher
-    atomic_fetch_add(&(region->batcher.n_entered), 1);
+    ++region->batcher.n_entered;
 
-    // Giving away our turn
-    atomic_fetch_add(&(region->batcher.turn), 1);
+    UnlockBatcher(&(region->batcher));
 
     return RO_OWNER;
   }
 
   while (true)
   {
-    // Waiting for our turn
-    unsigned long int turn = atomic_fetch_add(&(region->batcher.last_turn), 1);
-    while (turn != atomic_load(&(region->batcher.turn)))
-    {
-      relinquish_cpu();
-    }
+    LockBatcher(&(region->batcher));
 
-    if (atomic_load(&(region->batcher.n_write_slots)) != 0)
+    if (region->batcher.n_write_slots != 0)
     {
       // We can proceed
-      atomic_fetch_add(&(region->batcher.n_write_slots), -1);
+      --region->batcher.n_write_slots;
       break;
     }
 
-    // Giving away turn
-    atomic_fetch_add(&(region->batcher.turn), 1);
+    UnlockBatcher(&(region->batcher));
 
-    // Waiting for next epoch
-    unsigned long int last = atomic_load(&(region->batcher.counter));
-    while (last == atomic_load(&(region->batcher.counter)))
-    {
-      relinquish_cpu();
-    }
+    WaitForNextBatcherEpoch(&(region->batcher));
   }
 
   // Incrementing number of write transactions that entered
-  tx_t tx = atomic_fetch_add(&(region->batcher.n_write_entered), 1) + 1;
+  tx_t tx = ++region->batcher.n_write_entered;
 
   // Incrementing number of transactions entered,
-  atomic_fetch_add(&(region->batcher.n_entered), 1);
+  ++region->batcher.n_entered;
 
-  // Giving away our turn
-  atomic_fetch_add(&(region->batcher.turn), 1);
+  UnlockBatcher(&(region->batcher));
 
   return tx;
 }
 
 static inline bool Leave(Region *region, tx_t tx)
 {
-  // Waiting for our turn
-  unsigned long int turn = atomic_fetch_add(&(region->batcher.last_turn), 1);
-  while (turn != atomic_load(&(region->batcher.turn)))
-  {
-    relinquish_cpu();
-  }
+  LockBatcher(&(region->batcher));
 
   // Check if this is the last write transaction
-  if (atomic_fetch_add(&region->batcher.n_entered, -1) == 1 && atomic_load(&(region->batcher.n_write_entered)))
+  if (region->batcher.n_entered-- == 1 && region->batcher.n_write_entered)
   {
     // Write transaction
     for (size_t i = region->index - 1; i < region->index; --i)
@@ -116,31 +112,22 @@ static inline bool Leave(Region *region, tx_t tx)
     }
 
     // Resetting n_write_slots
-    atomic_store(&(region->batcher.n_write_slots), MAX_WRITE_TX_PER_EPOCH);
+    region->batcher.n_write_slots = MAX_WRITE_TX_PER_EPOCH;
 
     // Resetting n_write_entered
-    atomic_store(&(region->batcher.n_write_entered), 0);
+    region->batcher.n_write_entered = 0;
 
     // Moving to next epoch
     atomic_fetch_add(&(region->batcher.counter), 1);
   }
   else if (tx != RO_OWNER)
   {
-    // Giving away turn
-    atomic_fetch_add(&(region->batcher.turn), 1);
-
-    // Waiting for the next epoch for atomic consistency
-    unsigned long int epoch = atomic_load(&(region->batcher.counter));
-    while (epoch == atomic_load(&(region->batcher.counter)))
-    {
-      relinquish_cpu();
-    }
-
+    UnlockBatcher(&(region->batcher));
+    WaitForNextBatcherEpoch(&(region->batcher));
     return true;
   }
 
-  // Giving away turn
-  atomic_fetch_add(&(region->batcher.turn), 1);
+  UnlockBatcher(&(region->batcher));
 
   return true;
 }
