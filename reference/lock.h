@@ -16,7 +16,7 @@ struct lock_t {
  * @param lock Lock to initialize
  * @return Whether the operation is a success
 **/
-bool lock_init(struct lock_t* lock);
+z
 
 /** Clean up the given lock.
  * @param lock Lock to clean up

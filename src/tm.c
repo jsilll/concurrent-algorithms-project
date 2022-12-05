@@ -30,10 +30,9 @@ shared_t tm_create(size_t size, size_t align)
 
   // Initializing region->batcher
   region->batcher.n_entered = 0;
-  lock_init(&(region->batcher.lock));
-  region->batcher.n_write_entered = 0;
+  spin_lock_init(&(region->batcher.lock));
   atomic_store(&(region->batcher.counter), 0);
-  region->batcher.n_write_slots = MAX_WRITE_TX_PER_EPOCH;
+  region->batcher.n_write_slots = WRITE_TX_PER_EPOCH_MAX;
 
   // Allocating space for region->segments
   region->segments = malloc(getpagesize());
@@ -48,7 +47,7 @@ shared_t tm_create(size_t size, size_t align)
 
   region->segments->size = size;
   atomic_store(&(region->segments->status), DEFAULT);
-  atomic_store(&(region->segments->owner), NO_OWNER);
+  atomic_store(&(region->segments->owner), NO_TX);
 
   // Allocating Space for region->segment->data
   size_t control_size = (size / true_align) * sizeof(tx_t);
@@ -126,7 +125,7 @@ bool tm_end(shared_t shared, tx_t tx) { return Leave((Region *)shared, tx); }
 bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *target)
 {
   // If it's a read only transaction we only need to copy the contents of the memory
-  if (tx == RO_OWNER)
+  if (tx == RO_TX)
   {
     memcpy(target, source, size);
     return true;
@@ -149,13 +148,13 @@ bool tm_read(shared_t shared, tx_t tx, void const *source, size_t size, void *ta
   size_t max = size / region->align;
   for (size_t i = 0; i < max; ++i)
   {
-    tx_t expected = NO_OWNER;
+    tx_t expected = NO_TX;
     if (tx == atomic_load(controls + i))
     {
       // We are the owner
       memcpy(((char *)target) + i * region->true_align, ((char *)source) + i * region->true_align + segment->size, region->true_align);
     }
-    else if (atomic_compare_exchange_strong(controls + i, &expected, -tx) || expected == -tx || expected == RO_OWNER || (expected > RO_OWNER && atomic_compare_exchange_strong(controls + i, &expected, RO_OWNER)))
+    else if (atomic_compare_exchange_strong(controls + i, &expected, -tx) || expected == -tx || expected == RO_TX || (expected > RO_TX && atomic_compare_exchange_strong(controls + i, &expected, RO_TX)))
     {
       // We have previously read it or the word has not owner yet
       memcpy(((char *)target) + i * region->true_align, ((char *)source) + i * region->true_align, region->true_align);
@@ -251,12 +250,12 @@ bool tm_free(shared_t shared, tx_t tx, void *seg)
   Segment *segment = LookupSegment((Region *)shared, seg);
   if (segment == NULL)
   {
-    Undo((Region*)shared, tx);
+    Undo((Region *)shared, tx);
     return false;
   }
 
   // Verifying segment has no current owner
-  tx_t expected = NO_OWNER;
+  tx_t expected = NO_TX;
   if (!(atomic_compare_exchange_strong(&segment->owner, &expected, tx) || expected == tx))
   {
     Undo((Region *)shared, tx);

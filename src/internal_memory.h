@@ -4,7 +4,7 @@
 #include <tm.h>
 #include <stdatomic.h>
 
-#include "lock.h"
+#include "spin_lock.h"
 
 typedef _Atomic(tx_t) atomic_tx;
 
@@ -33,13 +33,13 @@ typedef enum _SegmentOwner
 {
   /// @brief Used when segment
   /// has no current owner
-  NO_OWNER = 0,
+  NO_TX = 0,
   /// @brief Used when segment
   /// owner is a read only transaction.
-  RO_OWNER = UINTPTR_MAX - 1,
+  RO_TX = UINTPTR_MAX - 1,
   /// @brief Used when the segment
   /// is scheduled to be removed.
-  RM_OWNER = UINTPTR_MAX - 2,
+  RM_TX = UINTPTR_MAX - 2,
 } SegmentOwner;
 
 /// @brief Used for expressing
@@ -48,7 +48,7 @@ typedef enum _BatcherCounterStatus
 {
   /// @brief Maximum number of threads
   /// the batcher can handle at each epoch
-  MAX_WRITE_TX_PER_EPOCH = 16,
+  WRITE_TX_PER_EPOCH_MAX = 16,
 } BatcherCounterStatus;
 
 /// @brief Represents a segment of memory in the STM.
@@ -76,22 +76,18 @@ typedef struct _Batcher
 {
   /// @brief Batcher's lock for any transactions that
   /// want to change on of its state variables
-  lock_t lock;
+  spin_lock_t lock;
   /// @brief Stores the current batcher epoch.
-  /// this variable is atomic for the case when 
-  /// a transaction doesn't have to lock the 
-  /// whole batcher when it is waiting for the 
-  /// next epoch to start doens't 
+  /// This variable needs to be atomic for the case
+  /// when a transaction is waiting for the
+  /// next epoch to start
   atomic_ulong counter;
   /// @brief Number of transactions that
   /// entered in the batcher in the current epoch.
   unsigned long n_entered;
   /// @brief Number of write transactions that still
   /// can enter in the batcher
-  unsigned long n_write_slots;
-  /// @brief Number of write transactions that
-  /// entered in the batcher in the current epoch.
-  unsigned long n_write_entered;
+  unsigned long n_write_slots; 
 } Batcher;
 
 /// @brief Represents a region in the

@@ -5,18 +5,18 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "yield.h"
 #include "macros.h"
-#include "relinquish.h"
 #include "internal_memory.h"
 
 static inline void LockBatcher(Batcher *batcher)
 {
-  lock_acquire(&(batcher->lock));
+  spin_lock_acquire(&(batcher->lock));
 }
 
 static inline void UnlockBatcher(Batcher *batcher)
 {
-  lock_release(&(batcher->lock));
+  spin_lock_release(&(batcher->lock));
 }
 
 static inline void WaitForNextBatcherEpoch(Batcher *batcher)
@@ -24,7 +24,7 @@ static inline void WaitForNextBatcherEpoch(Batcher *batcher)
   unsigned long int last = atomic_load(&(batcher->counter));
   while (last == atomic_load(&(batcher->counter)))
   {
-    relinquish();
+    yield();
   }
 }
 
@@ -39,7 +39,7 @@ static inline tx_t Enter(Region *region, bool is_ro)
 
     UnlockBatcher(&(region->batcher));
 
-    return RO_OWNER;
+    return RO_TX;
   }
 
   while (true)
@@ -59,7 +59,7 @@ static inline tx_t Enter(Region *region, bool is_ro)
   }
 
   // Incrementing number of write transactions that entered
-  tx_t tx = ++region->batcher.n_write_entered;
+  tx_t tx = WRITE_TX_PER_EPOCH_MAX - region->batcher.n_write_slots;
 
   // Incrementing number of transactions entered,
   ++region->batcher.n_entered;
@@ -73,22 +73,22 @@ static inline bool Leave(Region *region, tx_t tx)
 {
   LockBatcher(&(region->batcher));
 
-  // Check if this is the last write transaction
-  if (region->batcher.n_entered-- == 1 && region->batcher.n_write_entered)
+  // Check if this is the last transaction
+  if (region->batcher.n_entered-- == 1 && region->batcher.n_write_slots < WRITE_TX_PER_EPOCH_MAX)
   {
     // Write transaction
     for (size_t i = region->index - 1; i < region->index; --i)
     {
       Segment *segment = region->segments + i;
       // If this segment is meant to be deleted
-      if (atomic_load(&(segment->owner)) == RM_OWNER || atomic_load(&(segment->status)) == REMOVED || atomic_load(&(segment->status)) == ADDED_AFTER_REMOVE)
+      if (atomic_load(&(segment->owner)) == RM_TX || atomic_load(&(segment->status)) == REMOVED || atomic_load(&(segment->status)) == ADDED_AFTER_REMOVE)
       {
         unsigned long int expected = i + 1;
         if (!atomic_compare_exchange_strong(&(region->index), &expected, i))
         {
           // Resetting owner and status flags
           atomic_store(&(segment->status), DEFAULT);
-          atomic_store(&(segment->owner), RM_OWNER);
+          atomic_store(&(segment->owner), RM_TX);
         }
         else
         {
@@ -107,20 +107,17 @@ static inline bool Leave(Region *region, tx_t tx)
       }
 
       // Resetting owner and status flags
-      atomic_store(&(segment->owner), NO_OWNER);
+      atomic_store(&(segment->owner), NO_TX);
       atomic_store(&(segment->status), DEFAULT);
     }
 
     // Resetting n_write_slots
-    region->batcher.n_write_slots = MAX_WRITE_TX_PER_EPOCH;
-
-    // Resetting n_write_entered
-    region->batcher.n_write_entered = 0;
+    region->batcher.n_write_slots = WRITE_TX_PER_EPOCH_MAX;
 
     // Moving to next epoch
     atomic_fetch_add(&(region->batcher.counter), 1);
   }
-  else if (tx != RO_OWNER)
+  else if (tx != RO_TX)
   {
     UnlockBatcher(&(region->batcher));
     WaitForNextBatcherEpoch(&(region->batcher));
@@ -138,7 +135,7 @@ static inline Segment *LookupSegment(const Region *region, const void *source)
   for (size_t i = region->index - 1; i < region->index; --i)
   {
     // Segment has been deleted
-    if (atomic_load(&(region->segments[i].owner)) == RM_OWNER)
+    if (atomic_load(&(region->segments[i].owner)) == RM_TX)
     {
       return NULL;
     }
@@ -191,14 +188,14 @@ static inline void Undo(Region *region, tx_t tx)
     // Undo malloc of new segment
     if ((atomic_load(&(segment->status)) == ADDED || atomic_load(&(segment->status)) == ADDED_AFTER_REMOVE) && tx == atomic_load(&segment->owner))
     {
-      atomic_store(&(segment->owner), RM_OWNER);
+      atomic_store(&(segment->owner), RM_TX);
     }
-    else if (segment->data != NULL && atomic_load(&(segment->owner)) != RM_OWNER)
+    else if (segment->data != NULL && atomic_load(&(segment->owner)) != RM_TX)
     {
       // Reset segment in case its ours
       if (atomic_load(&(segment->owner)) == tx)
       {
-        atomic_store(&(segment->owner), NO_OWNER);
+        atomic_store(&(segment->owner), NO_TX);
         atomic_store(&(segment->status), DEFAULT);
       }
 
@@ -213,13 +210,13 @@ static inline void Undo(Region *region, tx_t tx)
         if (atomic_load(controls + j) == tx)
         {
           memcpy((char *)segment->data + segment->size + j * region->align, (char *)segment->data + j * region->align, region->align);
-          atomic_store(controls + j, NO_OWNER);
+          atomic_store(controls + j, NO_TX);
         }
         else
         {
           // In case we have previously read
           tx_t expected = -tx;
-          atomic_compare_exchange_weak(controls + j, &expected, NO_OWNER);
+          atomic_compare_exchange_weak(controls + j, &expected, NO_TX);
         }
       }
     }
