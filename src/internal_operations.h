@@ -1,5 +1,4 @@
-#ifndef _BASIC_OPERATIONS_H_
-#define _BASIC_OPERATIONS_H_
+#pragma once
 
 #include <stdlib.h>
 #include <string.h>
@@ -225,5 +224,3 @@ static inline void Undo(Region *region, tx_t tx)
   // Leaving transaction
   Leave(region, tx);
 }
-
-#endif

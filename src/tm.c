@@ -46,8 +46,8 @@ shared_t tm_create(size_t size, size_t align)
   memset(region->segments, 0, getpagesize());
 
   region->segments->size = size;
-  atomic_store(&(region->segments->status), DEFAULT);
   atomic_store(&(region->segments->owner), NO_TX);
+  atomic_store(&(region->segments->status), DEFAULT);
 
   // Allocating Space for region->segment->data
   size_t control_size = (size / true_align) * sizeof(tx_t);

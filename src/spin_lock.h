@@ -1,5 +1,4 @@
-#ifndef _SPIN_LOCK_H_
-#define _SPIN_LOCK_H_
+#pragma once
 
 #include <stdatomic.h>
 
@@ -21,7 +20,9 @@ static inline void spin_lock_init(spin_lock_t *lock)
 static inline void spin_lock_acquire(spin_lock_t *lock)
 {
     while (atomic_flag_test_and_set_explicit(&(lock->flag), memory_order_acquire))
-        ; // spin
+    {
+        yield();
+    }
 }
 
 /// @brief Unlocks a spin lock.
@@ -29,5 +30,3 @@ static inline void spin_lock_release(spin_lock_t *lock)
 {
     atomic_flag_clear_explicit(&(lock->flag), memory_order_release);
 }
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef _MACROS_H_
-#define _MACROS_H_
+#pragma once
 
 /**
  * @brief Define a proposition as likely true.
@@ -21,6 +20,4 @@
 #define unlikely(prop) __builtin_expect((prop) ? 1 : 0, 0)
 #else
 #define unlikely(prop) (prop)
-#endif
-
 #endif

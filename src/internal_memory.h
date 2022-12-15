@@ -1,5 +1,4 @@
-#ifndef _MEMORY_H_
-#define _MEMORY_H_
+#pragma once
 
 #include <tm.h>
 #include <stdatomic.h>
@@ -61,10 +60,10 @@ typedef struct _Segment
   /// this segment (v1 and v2).
   size_t size;
   /// @brief Identifies the current
-  /// owner of the segment. <---
+  /// owner of the segment.
   atomic_tx owner;
   /// @brief Stores whether this segment
-  /// was added or removed in this epoch. <---
+  /// was added or removed in this epoch.
   atomic_int status;
 } Segment;
 
@@ -87,7 +86,7 @@ typedef struct _Batcher
   unsigned long n_entered;
   /// @brief Number of write transactions that still
   /// can enter in the batcher
-  unsigned long n_write_slots; 
+  unsigned long n_write_slots;
 } Batcher;
 
 /// @brief Represents a region in the
@@ -108,5 +107,3 @@ typedef struct _Region
   /// memory segment in the region
   atomic_ulong index;
 } Region;
-
-#endif

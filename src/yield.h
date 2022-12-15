@@ -1,5 +1,4 @@
-#ifndef _RELINQUISH_CPU_H_
-#define _RELINQUISH_CPU_H_
+#pragma once
 
 #if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
 #include <xmmintrin.h>
@@ -20,5 +19,3 @@ static inline void yield()
     sched_yield();
 #endif
 }
-
-#endif
